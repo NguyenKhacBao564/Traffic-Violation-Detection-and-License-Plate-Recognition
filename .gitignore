@@ -1,0 +1,66 @@
+# ByteTrack
+*.blob
+*.onnx
+*.engine
+
+# PaddleOCR
+inference/
+paddleocr_env/
+
+# YOLO / ultralytics
+yolov8n.pt
+yolov8s.pt
+yolov8m.pt
+yolov8l.pt
+yolov8x.pt
+runs/
+
+# Large data — never push
+data/raw_videos/
+data/frames/
+data/annotations/
+data/samples/
+
+# Model weights
+models/detectors/
+models/plate_detector/
+models/ocr/
+
+# Output artifacts
+outputs/debug_videos/
+outputs/events/
+outputs/logs/
+*.mp4
+*.avi
+*.jpg
+*.png
+
+# Environments
+.env
+.venv/
+venv/
+conda_env/
+*.egg-info/
+.Python
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.mypy_cache/
+.pytest_cache/
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp files
+tmp/
+temp/
+*.tmp

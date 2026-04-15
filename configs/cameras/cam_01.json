@@ -1,0 +1,30 @@
+# Camera scene configuration
+# Thay đổi coordinates theo video thực tế của bạn
+
+{
+  "camera_id": "CAM_01",
+  "camera_name": "Ngã tư XYZ - Hướng Bắc",
+  "resolution": {
+    "width": 1920,
+    "height": 1080
+  },
+  "fps": 30,
+  "stop_line": [
+    [850, 680],
+    [1150, 680]
+  ],
+  "road_roi": [
+    [600, 400],
+    [1400, 400],
+    [1500, 1080],
+    [300, 1080]
+  ],
+  "traffic_light_roi": [
+    [1000, 200],
+    [1150, 200],
+    [1150, 380],
+    [1000, 380]
+  ],
+  "direction": "forward",
+  "notes": "Stop line nằm ngang ở dưới khung hình. Traffic light ở phía trên bên phải."
+}

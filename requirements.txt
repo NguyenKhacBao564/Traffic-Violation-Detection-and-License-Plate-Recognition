@@ -1,0 +1,23 @@
+# Dependencies
+# Core
+ultralytics>=8.0.0
+opencv-python>=4.9.0
+Pillow>=10.0.0
+numpy>=1.24.0
+pyyaml>=6.0
+
+# Tracking
+# ByteTrack — installed separately:
+#   git clone https://github.com/ifzhang/ByteTrack.git && cd ByteTrack && pip install -r requirements.txt
+# hoặc: pip install bytetrack
+
+# OCR
+paddleocr>=2.7.0
+paddlepaddle>=2.5.0  # CPU version; dùng paddlepaddle-gpu cho GPU
+
+# Utilities
+tqdm>=4.65.0
+python-dotenv>=1.0.0
+shapely>=2.0.0
+scipy>=1.11.0
+matplotlib>=3.7.0  # Debug visualization

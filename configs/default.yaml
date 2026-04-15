@@ -1,0 +1,38 @@
+# Default configuration for traffic violation detection
+
+model:
+  vehicle_model: yolov8n.pt
+  vehicle_conf: 0.3
+  vehicle_iou: 0.4
+  vehicle_classes: [2]  # class 2 = car in COCO
+
+  plate_detector_model: plate_detector.pt
+  plate_conf: 0.4
+
+tracking:
+  track_thresh: 0.5
+  track_buffer: 30
+  fps: 30
+  min_box_area: 1500
+  match_thresh: 0.8
+  mot20: false
+
+violation:
+  violation_window_frames: 30  # frames sau khi cross để xác nhận
+  min_tracking_frames: 5       # track phải đủ dài mới xem xét
+
+ocr:
+  lang: vi_en
+  use_angle_cls: true
+  vote_frames: 5  # số frame để fusion kết quả OCR
+
+evidence:
+  clip_duration_sec: 5
+  clip_fps: 15
+  save_debug_video: true
+  save_plate_crop: true
+
+output:
+  output_dir: outputs/events
+  debug_dir: outputs/debug_videos
+  log_dir: outputs/logs
