@@ -52,7 +52,7 @@ Chi tiết: xem [Plan.md](./Plan.md)
 
 ```bash
 # 1. Clone
-git clone https://github.com/YOUR_USERNAME/traffic-violation-lpr.git
+git clone https://github.com/NguyenKhacBao564/Traffic-Violation-Detection-and-License-Plate-Recognition.git
 cd traffic-violation-lpr
 
 # 2. Tạo môi trường
