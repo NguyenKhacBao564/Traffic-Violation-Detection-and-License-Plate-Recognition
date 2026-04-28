@@ -73,6 +73,13 @@ outputs/reports/
 *.jpg
 *.png
 
+# Demo assets committed to repo (exception for docs/assets/)
+!docs/
+!docs/assets/
+!docs/assets/*.jpg
+!docs/assets/*.png
+!docs/assets/*.gif
+
 # Environments
 .env
 .venv/

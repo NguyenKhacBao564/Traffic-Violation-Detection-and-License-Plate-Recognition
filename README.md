@@ -27,6 +27,10 @@ Layer 5 event review is complete on `cam_01_clip_001.mp4` under the configured s
 
 Raw videos are stored locally under `data/raw_videos/` and are ignored by Git.
 
+<img src="docs/assets/layer1_scene_overlay.jpg" width="720" alt="CAM_01 scene overlay — stop line and traffic light ROI"/>
+
+*CAM_01 scene overlay: dashed line = stop line, box = traffic light ROI.*
+
 Generated Layer 1 files:
 
 ```text
@@ -81,6 +85,10 @@ Input Video
 
 ## Layer 2 Debug Run
 
+<img src="docs/assets/layer2_debug_contact.jpg" width="720" alt="Layer 2 debug contact sheet — vehicle detection and tracking"/>
+
+*Contact sheet từ debug video: bounding box màu theo track_id, stop line trắng, traffic light ROI.*
+
 Latest verified command:
 
 ```bash
@@ -105,6 +113,10 @@ Notes:
 - Traffic light detection uses HSV first, then an overexposed-bulb fallback for this CCTV video.
 
 ## Layer 3 Event Baseline
+
+<img src="docs/assets/layer3_event_contact.jpg" width="720" alt="Layer 3 event contact sheet — violation candidates"/>
+
+*Contact sheet của 4 violation candidates đầu tiên trên CAM_01 (900 frame đầu).*
 
 Latest verified command:
 
@@ -133,6 +145,10 @@ data/annotations/cam_01_events.json
 Layer 3 produced 4 pending red-light crossing candidates on the first 900 frames. `data/annotations/cam_01_events.json` has been reviewed under the configured stop-line rule. Recall still needs full timeline ground truth.
 
 ## Layer 4 Plate OCR & Evidence
+
+<img src="docs/assets/layer4_evidence_contact.jpg" width="720" alt="Layer 4 evidence contact sheet — plate crops and OCR results"/>
+
+*Contact sheet của 5 event: mỗi ô gồm full frame + plate crop + OCR text.*
 
 Latest verified command:
 
@@ -205,6 +221,10 @@ python scripts/train_plate_detector.py \
 Best validation result from the current run: precision `0.989`, recall `0.998`, mAP50 `0.994`, mAP50-95 `0.73`. The exported local weight is `models/plate_detector/ccpd_yolov8n_best.pt`; model weights are intentionally ignored by Git.
 
 ## Layer 5 Evaluation & Portfolio Assets
+
+<img src="docs/assets/layer5_demo_redacted.jpg" width="720" alt="Layer 5 redacted demo — license plates blurred"/>
+
+*Demo contact sheet đã blur biển số (privacy-safe). 5 events, 4 OCR texts, ~19.5 FPS.*
 
 Latest verified commands:
 
