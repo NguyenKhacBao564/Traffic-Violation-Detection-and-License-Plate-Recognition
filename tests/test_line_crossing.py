@@ -32,6 +32,7 @@ def test_forward_crossing_detected():
     assert event is not None
     assert event.track_id == 1
     assert event.direction == CrossingDirection.FORWARD
+    assert checker.expected_direction == CrossingDirection.FORWARD
 
 
 def test_backward_movement_not_flagged():
@@ -49,3 +50,21 @@ def test_backward_movement_not_flagged():
     # Direction is BACKWARD because Y decreased
     assert event is not None
     assert event.direction == CrossingDirection.BACKWARD
+
+
+def test_backward_expected_direction():
+    """Camera config can explicitly expect backward crossings."""
+    checker = StopLineChecker(
+        stop_line=[[500, 600], [1000, 600]],
+        direction="backward",
+    )
+    assert checker.expected_direction == CrossingDirection.BACKWARD
+
+    event = checker.check_crossing(
+        track_id=1,
+        prev_point=(600, 650),
+        curr_point=(600, 550),
+        frame_idx=10,
+    )
+    assert event is not None
+    assert event.direction == checker.expected_direction

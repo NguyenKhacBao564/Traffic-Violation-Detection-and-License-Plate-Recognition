@@ -14,6 +14,8 @@ pyyaml>=6.0
 # OCR
 paddleocr>=2.7.0
 paddlepaddle>=2.5.0  # CPU version; dùng paddlepaddle-gpu cho GPU
+hyperlpr3>=0.1.3     # Chinese license plate OCR backend for the current demo video
+easyocr>=1.7.2       # fallback OCR backend when PaddleOCR is unavailable
 
 # Utilities
 tqdm>=4.65.0

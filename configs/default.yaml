@@ -8,6 +8,7 @@ model:
 
   plate_detector_model: plate_detector.pt
   plate_conf: 0.4
+  plate_fallback: true
 
 tracking:
   track_thresh: 0.5
@@ -22,9 +23,14 @@ violation:
   min_tracking_frames: 5       # track phải đủ dài mới xem xét
 
 ocr:
-  lang: vi_en
+  backend: auto
+  lang: ch
+  easyocr_languages: [ch_sim, en]
+  gpu: false
   use_angle_cls: true
   vote_frames: 5  # số frame để fusion kết quả OCR
+  min_confidence: 0.15
+  frame_stride: 5
 
 evidence:
   clip_duration_sec: 5

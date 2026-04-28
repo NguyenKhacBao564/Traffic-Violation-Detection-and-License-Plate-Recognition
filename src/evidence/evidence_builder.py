@@ -2,15 +2,13 @@
 from __future__ import annotations
 
 import json
-import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import cv2
 import numpy as np
 
-from src.plate.fusion import FusionResult
 from src.violation.event_state import ViolationEvent
 
 
@@ -40,7 +38,7 @@ class EvidenceBuilder:
         plate_crop: Optional[np.ndarray],
     ) -> None:
         """
-        Save all evidence for a confirmed violation event.
+        Save evidence for a violation event.
 
         Creates: outputs/events/EVT_XXXX/
           - frame.jpg     ← full frame
@@ -59,10 +57,10 @@ class EvidenceBuilder:
         if plate_crop is not None and self.config.save_plate_crop:
             plate_path = event_dir / "plate.jpg"
             cv2.imwrite(str(plate_path), plate_crop)
-            event.evidence_image_path = str(plate_path)
+            event.plate_crop_path = str(plate_path)
 
         # Save metadata
-        meta = asdict(event)
+        meta = event.to_dict()
         meta_path = event_dir / "event.json"
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
@@ -111,6 +109,32 @@ class EvidenceBuilder:
             writer.write(frame)
         writer.release()
 
+        return str(clip_path)
+
+    def save_clip(
+        self,
+        event_id: str,
+        frames: list[np.ndarray],
+        fps: float,
+    ) -> Optional[str]:
+        """Save a short evidence clip for one event."""
+        if not frames:
+            return None
+
+        event_dir = self.output_dir / event_id
+        event_dir.mkdir(parents=True, exist_ok=True)
+        clip_path = event_dir / "clip.mp4"
+
+        h, w = frames[0].shape[:2]
+        writer = cv2.VideoWriter(
+            str(clip_path),
+            cv2.VideoWriter_fourcc(*"mp4v"),
+            min(fps, self.config.clip_fps),
+            (w, h),
+        )
+        for frame in frames:
+            writer.write(frame)
+        writer.release()
         return str(clip_path)
 
     @staticmethod

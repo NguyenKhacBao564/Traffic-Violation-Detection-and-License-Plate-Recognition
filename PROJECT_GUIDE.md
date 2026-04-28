@@ -6,6 +6,52 @@
 
 ---
 
+## Trang thai hien tai sau Layer 4 baseline
+
+Du an hien da hoan thanh baseline cho Layer 1, Layer 2, Layer 3 va Layer 4.
+
+Layer 1 da chuan bi du lieu:
+
+- Da co 3 raw videos trong `data/raw_videos/`.
+- Da cat 3 clip 60 giay, 30 FPS trong `data/raw_videos/clips/`.
+- Da tao reference frames va contact sheet trong `data/frames/references/`.
+- Da tao scene overlays de xem stop line, road ROI va traffic light ROI.
+- Da tao `data/annotations/layer1_inventory.json`.
+- Da tao `data/annotations/cam_01_events_template.json`.
+- Da cap nhat camera configs `cam_01.json`, `cam_02.json`, `cam_03.json`.
+
+Layer 2 da chay detection/tracking/overlay:
+
+- Da tao debug video voi bbox, track ID, stop line, road ROI, traffic light ROI.
+- Da dung tracker fallback IoU vi ByteTrack chua cai.
+- Da log traffic light state.
+
+Layer 3 da tao event baseline:
+
+- Da tao 4 pending red-light crossing candidates tren 900 frame dau cua `cam_01_clip_001.mp4`.
+- Da luu `event.json` va `frame.jpg` cho tung event trong `outputs/events/`.
+- Da tao `outputs/reports/layer3_event_report.json`.
+- Da tao `outputs/reports/layer3_event_contact.jpg`.
+- Da tao `data/annotations/cam_01_events.json` de dien ground truth bang tay.
+
+Layer 4 da co dataset bien so va evidence OCR:
+
+- Da convert CCPD2019 thanh `data/processed/ccpd_layer4`.
+- Da tao YOLO labels cho plate detector.
+- Da tao `ocr_crops` va `ocr_labels` cho OCR.
+- Da tao `manifest.json` de truy vet nguon tung anh.
+- Da tao `outputs/reports/ccpd_layer4_sample_contact.jpg` de review nhanh.
+- Raw `CCPD2019/` va archive `CCPD2019.tar.xz` khong can giu nua sau khi da convert.
+- Da chay Layer 4 tren 900 frame dau cua `cam_01_clip_001.mp4`.
+- Da tao 4 event co `plate.jpg`.
+- Da confirmed OCR 3/4 event bang HyperLPR3.
+- Da luu `clip.mp4` cho cac event confirmed.
+- Da tao `outputs/reports/layer4_ocr_report.json`.
+
+Buoc tiep theo la review ground truth cho Layer 3/4, sau do tinh metric that. Fine-tune YOLO plate detector tren subset Layer 4 la huong nang cap de crop bien so on dinh hon.
+
+---
+
 ## 1. Tong quan du an
 
 ### 1.1. Bai toan can giai quyet
@@ -55,7 +101,7 @@ Du an nay manh hon nhieu project AI co ban vi no khong chi dung mot model de pre
 | Xu ly video | Doc frame, ghi debug video, cat clip bang chung |
 | Geometry | Kiem tra xe cat qua stop line |
 | State machine | Quan ly event `pending -> confirmed -> dismissed` |
-| OCR | Doc ky tu bien so bang PaddleOCR |
+| OCR | Doc ky tu bien so bang HyperLPR3/PaddleOCR/EasyOCR |
 | Data engineering nho | Luu event JSON, metadata, folder output |
 | Software engineering | Module hoa code, config rieng, test unit |
 
@@ -139,7 +185,7 @@ Frame Reader co nhiem vu:
 Vi du:
 
 ```text
-sample.mp4
+cam_01_clip_001.mp4
   -> frame 1
   -> frame 2
   -> frame 3
@@ -436,7 +482,7 @@ Full frame
   -> OCR
 ```
 
-**Cong nghe du kien:** YOLO custom cho license plate.
+**Cong nghe hien tai:** crop heuristic theo bbox xe, co the thay bang YOLO custom cho license plate.
 
 **Diem can chu y:**
 
@@ -446,6 +492,22 @@ YOLO pretrained `yolov8n.pt` tren COCO khong co class license plate. Neu dung no
 2. Fine-tune YOLO tren dataset bien so.
 3. Ban MVP nhanh co the crop vung duoi cua vehicle bbox roi OCR truc tiep, nhung do chinh xac se kem hon.
 
+Trong repo hien tai, dataset fine-tune da san sang tai:
+
+```text
+data/processed/ccpd_layer4/ccpd_plate.yaml
+data/processed/ccpd_layer4/images/{train,val,test}/
+data/processed/ccpd_layer4/labels/{train,val,test}/
+```
+
+Day la subset rut gon tu CCPD2019, gom 8,000 anh co bien so va 598 anh khong co bien so. No du cho baseline plate detector, con raw CCPD full khong can giu tiep.
+
+Trong Layer 4 baseline, repo chua bat buoc phai co weight YOLO plate detector. Thay vao do, `PlateDetector` lam nhu sau:
+
+1. Neu `plate_detector_model` ton tai, dung YOLO custom.
+2. Neu model khong ton tai, dung heuristic tim vung plate mau xanh/la va fallback crop vung duoi cua vehicle bbox.
+3. Luu `plate.jpg` de OCR va de reviewer xem lai.
+
 ---
 
 ### 4.8. Plate OCR - doc ky tu bien so
@@ -454,10 +516,10 @@ YOLO pretrained `yolov8n.pt` tren COCO khong co class license plate. Neu dung no
 
 OCR la viet tat cua **Optical Character Recognition**, nghia la nhan dien chu trong anh.
 
-Du an dung PaddleOCR de doc bien so:
+Du an co nhieu OCR backend:
 
 ```text
-plate image -> PaddleOCR -> text + confidence
+plate image -> OCR backend -> text + confidence
 ```
 
 Vi du:
@@ -467,12 +529,14 @@ Input: anh bien so
 Output: "51H-12345", confidence = 0.92
 ```
 
-**Tai sao dung PaddleOCR?**
+Backend hien tai:
 
-- Manh trong OCR tieng Viet va ky tu Latin.
-- Co pretrained model.
-- Co the doc text trong anh khong can training lai ngay.
-- Pho bien trong cac project OCR Python.
+- `hyperlpr`: phu hop video hien tai vi bien so la bien Trung Quoc.
+- `paddle`: huong chung cho OCR da ngon ngu neu cai duoc PaddleOCR.
+- `easyocr`: fallback de thu nghiem nhanh.
+- `none`: tat OCR nhung van luu plate crop.
+
+Trong run moi nhat, HyperLPR3 confirmed duoc 3/4 event candidate. Confidence con thap nen ket qua OCR can manual review truoc khi tinh Plate Accuracy.
 
 **Kho khan khi OCR bien so:**
 
@@ -573,7 +637,7 @@ Python la ngon ngu chinh vi he sinh thai AI/CV rat manh:
 
 - OpenCV cho video/image.
 - Ultralytics YOLO cho object detection.
-- PaddleOCR cho OCR.
+- HyperLPR3/PaddleOCR/EasyOCR cho OCR.
 - NumPy cho xu ly ma tran/anh.
 - PyYAML/JSON cho config.
 
@@ -604,9 +668,9 @@ ByteTrack duoc dung de tracking xe qua frame. Dau vao la detection bbox, dau ra 
 
 Mot project video AI co tracking se thuyet phuc hon project chi detect anh, vi no xu ly duoc thong tin theo thoi gian.
 
-### 5.5. PaddleOCR
+### 5.5. OCR backends
 
-PaddleOCR duoc dung de doc text bien so. No tra ve text va confidence. Ket qua OCR duoc dua vao fusion de tang do on dinh.
+Du an boc OCR thanh backend co the thay the. HyperLPR3 dang phu hop nhat voi video hien tai vi bien so la bien Trung Quoc. PaddleOCR/EasyOCR van giu vai tro fallback hoac huong mo rong khi doi domain. Moi backend tra ve `text + confidence`, sau do ket qua duoc dua vao fusion de tang do on dinh.
 
 ### 5.6. Shapely
 
@@ -731,9 +795,9 @@ Day la file rat quan trong. Neu toa do stop line hoac traffic light ROI sai, ca 
 
 ## 8. Giai thich ke hoach trien khai trong Plan/Milestones
 
-### Phase 1 - Skeleton & I/O
+### Phase 1 / Layer 1 - Data Preparation & I/O
 
-**Muc tieu:** tao khung du an va doc/ghi video duoc.
+**Muc tieu:** tao khung du an, chuan bi video ngan, lay frame tham chieu va dam bao input co the dung de debug.
 
 Can hoan thanh:
 
@@ -741,7 +805,9 @@ Can hoan thanh:
 - VideoReader doc duoc frame.
 - VideoWriter ghi duoc debug video.
 - Config camera mau.
-- Chay thu voi dummy data hoac video ngan.
+- Clip video ngan 30-60 giay.
+- Reference frames de annotate stop line/ROI.
+- Inventory JSON de ghi metadata video.
 
 **Vi sao phase nay quan trong?**
 
@@ -750,10 +816,12 @@ Neu khong doc/ghi video on dinh, cac model AI phia sau khong co du lieu dau vao/
 **Tieu chi pass:**
 
 ```bash
-python src/main.py --video data/raw_videos/sample.mp4 --camera configs/cameras/cam_01.json
+python src/main.py \
+  --video data/raw_videos/clips/cam_01_clip_001.mp4 \
+  --camera configs/cameras/cam_01.json
 ```
 
-Lenh chay khong crash va co output debug co ban.
+Lenh chay khong crash va co output debug co ban. Hien tai Layer 1 da chuan bi xong du lieu; buoc tiep theo la fix logic/runtime de lenh pipeline chay on dinh.
 
 ---
 
@@ -815,11 +883,12 @@ YOLO chi noi co xe. Tracking noi xe di dau. Stop line + den giao thong moi tra l
 
 Can hoan thanh:
 
-- Plate detector dung model phu hop.
-- Crop plate tu vehicle/plate bbox.
-- PaddleOCR doc text.
-- OCR fusion qua nhieu frame.
-- Save `frame.jpg`, `plate.jpg`, `clip.mp4`, `event.json`.
+- [x] Plate detector khong dung sai YOLO COCO.
+- [x] Crop plate tu vehicle/plate bbox bang heuristic fallback.
+- [x] HyperLPR3 doc text cho video bien so Trung Quoc.
+- [x] OCR fusion qua nhieu frame.
+- [x] Save `frame.jpg`, `plate.jpg`, `clip.mp4`, `event.json`.
+- [ ] Fine-tune YOLO plate detector tren `data/processed/ccpd_layer4/ccpd_plate.yaml` de tang do ben.
 
 **Tai sao day la phase kho?**
 
@@ -910,7 +979,7 @@ state = pending
 ### Buoc 7: Detect/OCR bien so
 
 ```text
-plate_crop -> PaddleOCR -> "51H-12345"
+plate_crop -> OCR backend -> "浙B56061"
 ```
 
 ### Buoc 8: Fusion
@@ -1003,7 +1072,7 @@ YOLO COCO khong co license plate. Day la blocker lon neu muon demo LPR that. Can
 
 ### 11.2. OCR phu thuoc chat luong crop
 
-Neu crop bien so sai, PaddleOCR se khong cuu duoc. Trong OCR pipeline, chat luong crop anh huong rat manh den ket qua cuoi.
+Neu crop bien so sai, OCR backend se khong cuu duoc. Trong OCR pipeline, chat luong crop anh huong rat manh den ket qua cuoi.
 
 ### 11.3. Traffic light HSV de sai neu ROI/anh sang khong tot
 
@@ -1023,16 +1092,16 @@ Stop line va traffic light ROI sai thi pipeline sai du model co tot.
 
 ### 12.1. Bat buoc truoc khi dua vao CV
 
-- [ ] Co video sample 30-60 giay.
-- [ ] Config camera dung voi video sample.
-- [ ] Chay end-to-end khong crash.
-- [ ] Debug video co bbox, track_id, stop line.
-- [ ] Co it nhat 1 event output neu video co vi pham.
-- [ ] `event.json` co schema ro rang.
-- [ ] Plate OCR co ket qua thuc, khong phai placeholder.
+- [x] Co video sample 30-60 giay.
+- [x] Co config camera ban dau cho video sample.
+- [x] Chay end-to-end khong crash.
+- [x] Debug video co bbox, track_id, stop line.
+- [x] Co it nhat 1 event output neu video co vi pham.
+- [x] `event.json` co schema ro rang.
+- [x] Plate OCR co ket qua thuc, khong phai placeholder.
 - [ ] README co demo GIF/video.
 - [ ] Co metric thuc te.
-- [ ] `python -m pytest` pass trong moi truong moi.
+- [x] `python -m pytest` pass trong moi truong hien tai.
 
 ### 12.2. Nen co neu muon gay an tuong hon
 
@@ -1051,7 +1120,7 @@ Khi du an da co demo va metrics, co the viet:
 
 ```text
 Traffic Violation Detection & License Plate Recognition
-- Built an offline fixed-camera computer vision pipeline using YOLOv8, ByteTrack, OpenCV, and PaddleOCR to detect red-light crossing violations and recognize license plates.
+- Built an offline fixed-camera computer vision pipeline using YOLOv8, tracking, OpenCV, and OCR backends to detect red-light crossing violations and recognize license plates.
 - Implemented vehicle tracking, stop-line crossing geometry, traffic-light color estimation, OCR temporal fusion, and evidence generation with JSON metadata.
 - Evaluated on N annotated traffic clips, achieving X% event precision, Y% recall, Z% plate accuracy, and K FPS processing speed.
 ```
@@ -1059,7 +1128,7 @@ Traffic Violation Detection & License Plate Recognition
 Phien ban tieng Viet de tu giai thich khi phong van:
 
 ```text
-Em xay dung mot pipeline xu ly video giao thong tu camera co dinh. Dau tien he thong dung YOLO de detect xe, sau do ByteTrack de gan ID cho xe qua nhieu frame. Em dung ROI va HSV threshold de xac dinh den giao thong, dung geometry de kiem tra xe co cat qua vach dung hay khong. Neu xe cat qua vach luc den do, he thong tao event vi pham, crop bien so, dung PaddleOCR de doc bien so va hop nhat ket qua OCR qua nhieu frame. Cuoi cung he thong luu anh, clip va JSON metadata lam bang chung.
+Em xay dung mot pipeline xu ly video giao thong tu camera co dinh. Dau tien he thong dung YOLO de detect xe, sau do tracker de gan ID cho xe qua nhieu frame. Em dung ROI va HSV threshold de xac dinh den giao thong, dung geometry de kiem tra xe co cat qua vach dung hay khong. Neu xe cat qua vach luc den do, he thong tao event vi pham, crop bien so, dung OCR backend phu hop domain de doc bien so va hop nhat ket qua OCR qua nhieu frame. Cuoi cung he thong luu anh, clip va JSON metadata lam bang chung.
 ```
 
 ---
@@ -1169,7 +1238,7 @@ Du an nay co nen lam main project CV khong? **Co.**
 
 Nhung dieu kien la phai bien no tu scaffold thanh demo co bang chung that:
 
-- Co video sample.
+- Co video sample. (Da co o Layer 1)
 - Chay end-to-end.
 - Luu duoc event.
 - Doc duoc bien so o mot so case.
@@ -1179,4 +1248,3 @@ Nhung dieu kien la phai bien no tu scaffold thanh demo co bang chung that:
 Gia tri lon nhat cua project khong nam o viec "dung YOLO", ma nam o viec ban xay duoc mot pipeline co nhieu thanh phan: detection, tracking, traffic light estimation, geometry, OCR, evidence, storage va evaluation.
 
 Neu ban hieu va giai thich duoc tung stage trong tai lieu nay, ban da co mot nen tang rat tot de trinh bay project trong phong van AI/CV Intern.
-

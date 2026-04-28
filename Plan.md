@@ -1,225 +1,209 @@
 # Plan — Traffic Violation LPR MVP
 
-## 1. Project Overview
+## 1. Project Goal
 
-**Name:** Traffic Violation Detection and License Plate Recognition from Fixed-Camera Video
-**Short:** traffic-violation-lpr
-**Goal:** Xây dựng hệ thống xử lý video từ camera giao thông cố định, phát hiện ô tô vượt đèn đỏ, đọc biển số, lưu bằng chứng. Phục vụ portfolio AI Engineer Intern.
+Build an offline fixed-camera traffic video pipeline that can:
 
----
+1. Detect cars.
+2. Track cars across frames.
+3. Estimate traffic light state.
+4. Detect stop-line crossing.
+5. Create violation events.
+6. Read license plates.
+7. Save evidence and JSON metadata.
+8. Report real metrics on annotated clips.
 
-## 2. Mục tiêu MVP (v1 — chỉ ô tô, 1 camera, offline)
-
-| STT | Mục tiêu |
-|-----|----------|
-| 1 | Detect ô tô trong video (YOLO) |
-| 2 | Track xe qua nhiều frame (ByteTrack / BoT-SORT) |
-| 3 | Xác định trạng thái đèn giao thông (màu đỏ/vàng/xanh) |
-| 4 | Phát hiện xe vượt stop line khi đèn đỏ |
-| 5 | Đọc biển số xe vi phạm (YOLO plate + PaddleOCR) |
-| 6 | Lưu ảnh/clip bằng chứng + metadata JSON |
-| 7 | Đo lường: Event Precision, Event Recall, Plate Accuracy |
+The project is scoped as a portfolio MVP, not a production traffic enforcement system.
 
 ---
 
-## 3. Tech Stack
+## 2. MVP Scope
 
-| Layer | Tool | Lý do |
-|-------|------|-------|
-| Detection (xe) | YOLO (ultralytics) | Sẵn có, nhanh, dễ train thêm |
-| Tracking | ByteTrack | Mã nguồn mở, hiệu quả, dễ tích hợp |
-| Plate Detection | YOLO custom | Fine-tune trên dữ liệu biển số VN |
-| OCR | PaddleOCR | Tốt cho tiếng Việt, dễ cài |
-| Video I/O | OpenCV | Tiêu chuẩn công nghiệp |
-| Storage | JSON (v1) → SQLite/PostgreSQL (v2) | Đơn giản, mở rộng được |
-| Env management | conda/pip | Dễ reproduce |
+| Item | Scope |
+|---|---|
+| Camera | One fixed traffic camera scene first |
+| Video | Offline daytime clips |
+| Vehicle type | Cars first |
+| Violation type | Red-light / stop-line crossing |
+| Storage | JSON files |
+| Public demo | Blur/anonymize plates before sharing |
+
+Out of scope for MVP:
+
+- Real-time streaming.
+- Multi-camera deployment.
+- Motorbike-specific logic.
+- Night/rain robustness.
+- Real enforcement integration.
+- Training all models from scratch.
+
+---
+
+## 3. Current Data Layers
+
+### Layer 1 — Raw Video Preparation ✅ Done
+
+Purpose: make raw videos usable for development.
+
+Completed outputs:
+
+```text
+data/raw_videos/clips/cam_01_clip_001.mp4
+data/raw_videos/clips/cam_02_clip_001.mp4
+data/raw_videos/clips/cam_03_clip_001.mp4
+data/frames/references/layer1_contact_sheet.jpg
+data/frames/references/cam_01_scene_overlay.jpg
+data/annotations/layer1_inventory.json
+data/annotations/cam_01_events_template.json
+configs/cameras/cam_01.json
+configs/cameras/cam_02.json
+configs/cameras/cam_03.json
+```
+
+Layer 1 does not prove the AI pipeline yet. It only ensures the videos are readable, clipped, documented, and ready for annotation/debugging.
+
+### Layer 2 — Detection, Tracking & Scene Overlay ✅ Baseline done
+
+Purpose: run computer vision on the Layer 1 clips and visually verify the scene logic.
+
+Tasks:
+
+- Fix crossing logic so `direction = backward` works.
+- Validate camera config before pipeline starts.
+- Run YOLO vehicle detection.
+- Run tracking and draw `track_id`.
+- Draw stop line, road ROI, traffic light ROI.
+- Produce a debug video.
+
+### Layer 3 — Violation Event Baseline ✅ Baseline done
+
+Purpose: create `pending` events when tracked vehicles cross the stop line under red light.
+
+Tasks:
+
+- Verify traffic light HSV state.
+- Compare vehicle movement against stop line.
+- Create event state `pending`.
+- Save pending event JSON and snapshot frame.
+- Create a predicted-event report.
+- Create a manual annotation file for review.
+
+Current status:
+
+```text
+outputs/events/EVT_0001/event.json
+outputs/events/EVT_0002/event.json
+outputs/events/EVT_0003/event.json
+outputs/events/EVT_0004/event.json
+outputs/reports/layer3_event_report.json
+outputs/reports/layer3_event_contact.jpg
+data/annotations/cam_01_events.json
+```
+
+Precision/recall are still pending because `data/annotations/cam_01_events.json` needs manual labels.
+
+### Layer 4 — Plate OCR & Evidence ✅ Baseline done
+
+Purpose: attach plate text and evidence files to confirmed events.
+
+Dataset status:
+
+```text
+data/processed/ccpd_layer4/ccpd_plate.yaml
+data/processed/ccpd_layer4/manifest.json
+outputs/reports/ccpd_layer4_sample_contact.jpg
+```
+
+CCPD2019 is only needed as a source for this compact subset. After conversion, the full raw folder/archive is not needed for later layers.
+
+Tasks:
+
+- Avoid using COCO YOLO as a plate detector.
+- Use a heuristic vehicle/plate crop fallback when no trained plate model exists.
+- Run OCR with HyperLPR3 for the current Chinese plate video.
+- Fuse OCR readings across frames.
+- Save `frame.jpg`, `plate.jpg`, `clip.mp4`, and `event.json`.
+
+Current result on 900 frames:
+
+```text
+outputs/events_layer4/
+outputs/reports/layer4_ocr_report.json
+outputs/reports/layer4_evidence_contact.jpg
+```
+
+The robust upgrade is to fine-tune a one-class YOLO plate detector on `data/processed/ccpd_layer4/ccpd_plate.yaml`.
+
+### Layer 5 — Evaluation & Portfolio Polish
+
+Purpose: make the project CV-ready.
+
+Tasks:
+
+- Measure Event Precision, Event Recall, Plate Accuracy, FPS.
+- Create anonymized demo GIF/video.
+- Update README with results.
+- Keep raw/private video files out of Git.
 
 ---
 
 ## 4. Pipeline Architecture
 
-```
+```text
 Input Video
-    ↓
-Frame Reader (cv2.VideoCapture)
-    ↓
-Vehicle Detector (YOLO — car class only)
-    ↓
-Vehicle Tracker (ByteTrack — assign track_id)
-    ↓
-Traffic Light State Estimator (color histogram / rule-based)
-    ↓
-Stop Line Crossing Logic (geometry check)
-    ↓
-Violation Event Trigger (red light + crossed = violation)
-    ↓
-Plate Detector (YOLO custom — run ONLY on violation frames)
-    ↓
-Plate OCR (PaddleOCR — temporal fusion / voting)
-    ↓
-Evidence Builder (crop plate image, save clip, save JSON)
-    ↓
-Event Store (JSON/DB)
+  -> Frame Reader
+  -> Vehicle Detector
+  -> Vehicle Tracker
+  -> Traffic Light State Estimator
+  -> Stop-Line Crossing Logic
+  -> Violation Event Trigger
+  -> Plate Detector + OCR
+  -> Evidence Builder
+  -> Event Store
 ```
 
 ---
 
-## 5. Implementation Phases (8 tuần)
+## 5. Tech Stack
 
-### Phase 1 — Skeleton & I/O (Tuần 1–2)
-- [ ] Scaffold repo (đã làm)
-- [ ] Video reader: đọc frame, FPS, resolution
-- [ ] Video writer: ghi debug video với bbox
-- [ ] Scene config JSON cho 1 camera mẫu
-- [ ] Chạy thử end-to-end với dummy detections
-
-### Phase 2 — Detection + Tracking (Tuần 3–4)
-- [ ] Tích hợp YOLO (vehicle detection)
-- [ ] Filter chỉ giữ class "car"
-- [ ] Tích hợp ByteTrack
-- [ ] Debug: vẽ track_id lên frame
-- [ ] Đánh giá: track smoothness, ID switch rate
-
-### Phase 3 — Traffic Light + Stop Line (Tuần 5–6)
-- [ ] Traffic light ROI + color extraction (HSV histogram)
-- [ ] Stop line định nghĩa trong scene config (coordinates)
-- [ ] Line crossing logic: bottom-center of bbox crosses stop line
-- [ ] Violation event state machine (pending → confirmed → dismissed)
-- [ ] Debug: visualize stop line, light state
-
-### Phase 4 — Plate OCR + Evidence (Tuần 7)
-- [ ] Tích hợp YOLO plate detection (pretrained hoặc fine-tune đơn giản)
-- [ ] Tích hợp PaddleOCR
-- [ ] Temporal fusion: đọc nhiều frame → vote kết quả tốt nhất
-- [ ] Evidence builder: ảnh full-frame, ảnh crop plate, clip 3–8s
-- [ ] Lưu event JSON
-
-### Phase 5 — Evaluation + Polish (Tuần 8)
-- [ ] Tính Event Precision, Recall, Plate Accuracy trên video mẫu
-- [ ] Tối ưu tốc độ (bỏ qua frame không cần)
-- [ ] Viết README + demo GIF
-- [ ] Dọn code, thêm type hints, docstrings
-- [ ] Push lên GitHub
+| Layer | Tool | Reason |
+|---|---|---|
+| Video I/O | OpenCV | Standard video/frame processing |
+| Vehicle detection | Ultralytics YOLO | Fast pretrained baseline |
+| Tracking | ByteTrack / tracker wrapper | Track IDs across frames |
+| Traffic light | ROI + HSV | Simple and explainable for fixed camera |
+| Geometry | Shapely / line crossing | Stop-line crossing logic |
+| OCR | HyperLPR3 / PaddleOCR / EasyOCR | Configurable OCR; HyperLPR3 fits the current Chinese plate demo |
+| Storage | JSON | Simple MVP evidence format |
 
 ---
 
-## 6. Data Layers
+## 6. Immediate Next Steps
 
-### Layer A — Raw Videos
-- 5–10 video ban ngày, 1–5 phút/video
-- Camera cố định, stop line rõ, đèn giao thông thấy được
-- Biển số không quá nhỏ
-- Nguồn: ghi hình thực tế hoặc dataset công khai (AI City, MTSD,...)
+1. Fill manual labels in `data/annotations/cam_01_events.json`.
+2. Optionally train or fine-tune plate detector on:
 
-### Layer B — Scene Annotations (JSON)
-```json
-{
-  "camera_id": "CAM_01",
-  "stop_line": [[x1, y1], [x2, y2]],
-  "road_roi": [[x,y], ...],
-  "traffic_light_roi": [[x,y], ...],
-  "direction": "forward"
-}
+```bash
+yolo detect train \
+  model=yolov8n.pt \
+  data=data/processed/ccpd_layer4/ccpd_plate.yaml \
+  epochs=30 \
+  imgsz=640
 ```
-→ Đánh dấu thủ công, không cần AI.
 
-### Layer C — Object/Event Annotations (tùy chọn v2)
-- bbox xe, bbox biển số, label vi phạm/không
-- Cần cho việc đánh giá recall
+3. Fill manual labels for Layer 3/4 events.
+4. Report event and plate metrics after manual review.
 
 ---
 
 ## 7. Success Metrics
 
 | Metric | Target v1 |
-|--------|-----------|
+|---|---:|
 | Event Precision | > 80% |
-| Event Recall | > 70% (trên video đã test) |
-| Plate Accuracy (on true events) | > 85% |
-| FPS (processing) | ≥ 15 FPS |
-| False Positive per video | ≤ 3 |
+| Event Recall | > 70% |
+| Plate Accuracy | > 85% |
+| Processing FPS | >= 15 |
+| False positives per clip | <= 3 |
 
-Công thức:
-- `Event Precision = TP / (TP + FP)`
-- `Event Recall = TP / (TP + FN)`
-- `Plate Accuracy = plates_correct / true_violation_events`
-
----
-
-## 8. Scope Control (Out-of-Scope ngay)
-
-- Real-time streaming
-- Nhiều camera
-- Xe máy
-- Ban đêm / mưa lớn
-- Vượt tốc độ / sai làn
-- Nhận diện người lái
-- Tích hợp hệ thống xử phạt thật
-- Training YOLO từ đầu (dùng pretrained)
-
----
-
-## 9. File Structure (target)
-
-```
-traffic-violation-lpr/
-├── configs/
-│   ├── cameras/
-│   │   └── cam_01.json
-│   └── default.yaml
-├── data/
-│   ├── raw_videos/        ← gitignore
-│   ├── frames/            ← gitignore
-│   ├── annotations/
-│   └── samples/
-├── models/
-│   ├── detectors/         ← weights gitignore
-│   ├── plate_detector/    ← weights gitignore
-│   └── ocr/
-├── src/
-│   ├── io/
-│   │   ├── video_reader.py
-│   │   └── writer.py
-│   ├── detection/
-│   │   └── vehicle_detector.py
-│   ├── tracking/
-│   │   └── vehicle_tracker.py
-│   ├── traffic_light/
-│   │   └── light_state.py
-│   ├── geometry/
-│   │   └── line_crossing.py
-│   ├── violation/
-│   │   ├── event_state.py
-│   │   └── violation_engine.py
-│   ├── plate/
-│   │   ├── plate_detector.py
-│   │   ├── plate_ocr.py
-│   │   └── fusion.py
-│   ├── evidence/
-│   │   └── evidence_builder.py
-│   ├── storage/
-│   │   └── event_store.py
-│   └── main.py
-├── outputs/
-│   ├── debug_videos/      ← gitignore
-│   ├── events/            ← gitignore
-│   └── logs/              ← gitignore
-├── notebooks/
-├── tests/
-├── requirements.txt
-├── .env.example
-├── .gitignore
-├── README.md
-├── MILESTONES.md
-└── Plan.md
-```
-
----
-
-## 10. Next Steps (First Week Actions)
-
-1. Chuẩn bị 3–5 video mẫu (quay thực tế hoặc cắt từ YouTube giao thông VN)
-2. Định nghĩa stop line + light ROI cho scene đầu tiên → `configs/cameras/cam_01.json`
-3. Cài đặt môi trường: `conda create -n lpr python=3.10 && pip install ultralytics ByteTrack opencv-python paddleocr`
-4. Chạy thử video reader + YOLO inference đơn giản
-5. Verify: bounding box xe xuất hiện đúng trên video
+Metrics must be reported from manually annotated clips.

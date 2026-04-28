@@ -33,9 +33,18 @@ class StopLineChecker:
         direction: str = "forward",
         line_thickness: int = 10,
     ) -> None:
+        if direction not in {"forward", "backward"}:
+            raise ValueError("direction must be either 'forward' or 'backward'")
         self.stop_line = LineString(stop_line)
         self.direction = direction
         self.line_thickness = line_thickness
+
+    @property
+    def expected_direction(self) -> CrossingDirection:
+        """Return the configured crossing direction for this camera."""
+        if self.direction == "forward":
+            return CrossingDirection.FORWARD
+        return CrossingDirection.BACKWARD
 
     def check_crossing(
         self,
@@ -62,11 +71,6 @@ class StopLineChecker:
 
         if not movement_line.intersects(self.stop_line):
             return None
-
-        if self.direction == "forward":
-            expected_dir = CrossingDirection.FORWARD
-        else:
-            expected_dir = CrossingDirection.BACKWARD
 
         # For forward: expect Y increase (moving down in image)
         # Y increases downward in image coordinates

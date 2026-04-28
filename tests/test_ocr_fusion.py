@@ -20,6 +20,7 @@ def test_majority_vote_wins():
     fusion.add_reading("51H-1234S", 0.8)  # wrong
     result = fusion.fuse()
     assert result.final_text == "51H-12345"
+    assert result.total_frames == 5
 
 
 def test_empty_readings_returns_empty():
@@ -36,3 +37,11 @@ def test_short_readings_ignored():
     fusion.add_reading("", 0.9)    # empty
     result = fusion.fuse()
     assert result.final_text == ""
+
+
+def test_fusion_ready_after_vote_frames():
+    fusion = OCRFusion(vote_frames=2)
+    fusion.add_reading("ABC123", 0.5)
+    assert not fusion.is_ready
+    fusion.add_reading("ABC123", 0.5)
+    assert fusion.is_ready

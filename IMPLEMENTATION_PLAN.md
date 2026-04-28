@@ -1,333 +1,266 @@
-# Implementation Plan — traffic-violation-lpr
-## Phase: Baseline Runnable
+# Implementation Plan — Baseline Runnable
 
-### Mục tiêu của phase này
+Muc tieu cua phase nay: bien repo thanh baseline chay duoc tren clip Layer 1, co debug video de kiem tra detection, tracking, traffic light ROI va stop-line crossing.
 
-Biến repo từ **scaffold đúng hướng, chưa validate** thành **baseline chạy được trên 1 video test ngắn (30s–1p)**.
+Layer 1 da xong, nen file nay khong con tap trung vao viec tim video nua. Viec tiep theo la lam cho pipeline chay that tren:
 
-Phạm vi phase:
-- Chỉ fix bugs và design issues đã verified từ static review
-- Chưa tối ưu model
-- Chưa mở rộng scope (nhiều camera, xe máy, v.v.)
-- Chưa thay stack lớn nếu chưa có runtime evidence
-
----
-
-## 1. Goal of this phase
-
-| Mục tiêu | Định nghĩa "xong" |
-|-----------|-------------------|
-| Baseline chạy end-to-end trên 1 video ngắn | Không crash, tạo output |
-| Mỗi pipeline stage có log để verify | Track ID, light state, plate text xuất hiện trong log |
-| Tạo debug video có overlay | Visual verification của detection + tracking |
-| Tạo event JSON hợp lệ | Schema đúng, `state` là string |
-| Biết tracker path có vấn đề không | Có/th không → quyết định ByteTrack tiếp |
-
-Phase này **không** yêu cầu:
-- OCR accuracy cao
-- Zero false positive
-- Đúng hết violation thật
-- Clip video hoàn chỉnh
-
----
-
-## 2. Ordered work items
-
-### Step 1 — Config + data readiness
-*Trước khi chạm bất kỳ code pipeline nào*
-
-**Mục tiêu:** Đảm bảo input hợp lệ, có video test, có config đúng.
-
-```
-1a. Chuẩn bị 1 video test ngắn (30s–1p)
-    → Đặt vào data/raw_videos/sample.mp4
-    → Cam kết: camera cố định, thấy rõ stop line, thấy đèn giao thông
-
-1b. Cập nhật configs/cameras/cam_01.json với tọa độ thực
-    → Dùng notebook 01 để click xác định stop_line và light ROI trên video
-    → Validate: stop_line là 2 điểm, light_roi là 4 điểm
-
-1c. Validate camera config keys
-    → Kiểm tra có đủ: camera_id, stop_line, traffic_light_roi, direction
-    → Fail early với clear error nếu thiếu (P3 trong evaluate.md)
-```
-
-**Đầu ra mong muốn:**
-- File video tồn tại tại `data/raw_videos/sample.mp4`
-- `configs/cameras/cam_01.json` có coordinates thực cho video đó
-
-**Tiêu chí hoàn thành:** Chạy `python -c "import json; c=json.load(open('configs/cameras/cam_01.json')); assert 'stop_line' in c and 'traffic_light_roi' in c"` → không error.
-
----
-
-### Step 2 — Plate detector fix
-*Fix P1 trong evaluate.md*
-
-**Mục tiêu:** Plate path không còn là no-op. OCR được gọi với input hợp lý.
-
-```
-2a. Chọn approach:
-    Option A (nhanh nhất): Dùng PaddleOCR trực tiếp trên vehicle crop region
-      → Crop: vùng phía dưới của vehicle bbox (y2-40px → y2+20px)
-      → Không cần plate detector riêng
-      → PaddleOCR.ocr() vừa detect text bbox VỪA recognize
-
-    Option B: Truyền pretrained plate model path vào PlateDetector
-      → Tìm pretrained YOLO plate detector (Roboflow / HuggingFace community)
-      → Config: plate_detector_model: <path_to_model>
-
-2b. Cập nhật main.py: truyền plate_crop thực vào save_event()
-    → Không truyền None nữa
-    → Lưu crop vào trường riêng, không overwrite frame_path
-
-2c. Thêm log: print plate text mỗi khi OCR đọc được
-    → Track xem OCR path có được gọi không
-```
-
-**Đầu ra mong muốn:**
-- `plate_crop` trong evidence không còn luôn `None`
-- Log có dòng `plate_text: 51H-12345` hoặc `plate_text:` (rỗng = cần điều chỉnh crop region)
-
-**Tiêu chí hoàn thành:** Chạy pipeline 10 frame đầu → kiểm tra log → OCR được gọi ít nhất 1 lần cho 1 vehicle.
-
----
-
-### Step 3 — Evidence schema fix
-*Fix P3 trong evaluate.md*
-
-**Mục tiêu:** Event JSON schema nhất quán. `state` là string.
-
-```
-3a. Thay asdict(event) → serialize tường minh
-    → state: event.state.value
-    → Tất cả Optional fields: None nếu None, không serialize Enum
-
-3b. Tách evidence_image_path và plate_crop_path
-    → frame.jpg → evidence_image_path
-    → plate crop → plate_crop_path (trường riêng)
-    → Không overwrite nữa
-
-3c. Verify: load event.json rồi kiểm tra types
-    → state là str, plate_crop_path là str hoặc None
-```
-
-**Đầu ra mong muốn:**
-- `event.json` load được, `state` là string `"pending"/"confirmed"`
-- Cả 2 image path đều tồn tại và khác nhau khi có plate
-
-**Tiêu chí hoàn thành:** `python -c "import json; e=json.load(open('outputs/events/EVT_0001/event.json')); assert isinstance(e['state'], str)"` → không error.
-
----
-
-### Step 4 — Runtime verification run
-*Chạy pipeline với instrumentation*
-
-**Mục tiêu:** Baseline chạy được, verify mỗi stage, biết tracker path có vấn đề không.
-
-```
-4a. Chạy pipeline: python src/main.py --video data/raw_videos/sample.mp4 \
-    --camera configs/cameras/cam_01.json --max-frames 300 --no-debug-video
-
-4b. In thêm instrumentation:
-    - Mỗi frame: log track_id count
-    - Mỗi 30 frame: log light_state hiện tại
-    - Mỗi OCR read: log plate_text + conf
-    - Mỗi event confirm: log event_id + track_id
-
-4c. Review output:
-    - Debug video có bbox và track_id overlay
-    - Log có track_ids ổn định?
-    - Log có light_state không toàn UNKNOWN?
-    - Có plate text đọc được?
-    - Có event nào confirmed?
-```
-
-**Tiêu chí hoàn thành:** Xem Phase 5 (Acceptance Criteria).
-
----
-
-### Step 5 — Small cleanup sau baseline
-*Sau khi baseline chạy được*
-
-```
-5a. OCRFusion total_frames semantics (DR3 trong evaluate.md)
-    → total_frames = len(self._readings) thay vì len(vote_scores)
-
-5b. Clip buffer — quyết định có cần fix không
-    → Nếu event_clip_path luôn rỗng và đây là requirement → fix append_clip_frames
-    → Nếu không cần clip cho demo → defer
-
-5c. DR5: Thêm config validation rõ ràng cho stop_line / light_roi coords
-    → (Đã làm ở Step 1b nhưng có thể cần defensive check trong code)
+```text
+data/raw_videos/clips/cam_01_clip_001.mp4
+configs/cameras/cam_01.json
 ```
 
 ---
 
-## 3. File-by-file patch plan
+## 1. Trang thai hien tai
 
-| File | Vấn đề | Loại việc | Ưu tiên | Ghi chú |
-|------|---------|-----------|---------|---------|
-| `configs/cameras/cam_01.json` | Coordinates chưa có giá trị thực | verify-first | Step 1 | Cần xác định từ video thực |
-| `src/main.py:146–148` | PlateDetector không nhận model path → dùng COCO | fix-now | P1 | Truyền pretrained model HOẶC dùng OCR trực tiếp |
-| `src/main.py:91` | cam_cfg không validate → crash ở line 123/128 | fix-now | P3 | Thêm assert/check cho required keys |
-| `src/evidence/evidence_builder.py:65` | asdict(event) → state không phải string | fix-now | P3 | Serialize tường minh: state.value |
-| `src/evidence/evidence_builder.py:56,62` | plate_path overwrite frame_path | fix-now | P3 | Tách 2 trường |
-| `src/main.py:200–260` | Plate crop always None (phụ thuộc P1) | fix-now | P1 | Truyền crop thực sau khi P1 xong |
-| `src/main.py:228–233` | clip_buffer không được ghi | verify-first | After baseline | Chỉ fix nếu clip là requirement |
-| `src/plate/fusion.py:64` | total_frames = len(vote_scores) | cleanup-later | Step 5 | Không ảnh hưởng MVP baseline |
-| `src/io/video_reader.py:63–73` | iter_frames skip logic ngược | cleanup-later | Deferred | Không ảnh hưởng main pipeline |
-| `src/traffic_light/light_state.py` | HSV threshold hardcoded | verify-first | Step 4 | Điều chỉnh sau baseline nếu cần |
+### Da xong
 
----
+- Raw videos doc duoc bang OpenCV.
+- Da cat 3 clip 60 giay, 30 FPS.
+- Da tao reference frames va scene overlays.
+- Da tao `layer1_inventory.json`.
+- Da tao camera configs cho `cam_01`, `cam_02`, `cam_03`.
+- Camera configs da la JSON hop le.
 
-## 4. Runtime verification checklist
+### Chua xong
 
-### 4.1 Tracker verification
-```
-Cần quan sát:
-  - Mở debug video → cùng 1 xe đi từ đầu đến cuối → cùng 1 màu / cùng 1 track_id
-  - Track ID không nhảy liên tục (bình thường nhảy 1-2 lần khi occlude)
-  - Track ID không đổi khi xe chưa ra khỏi frame
-
-Thế nào là PASS:
-  - ≥80% vehicles giữ nguyên track_id từ frame xuất hiện đến khi ra khỏi frame
-  - Không có track ID > 50 (quá nhiều xe cùng lúc = bình thường với giao thông đông)
-
-Thế nào là FAIL:
-  - 1 xe bất kỳ nhảy track_id > 3 lần trong 10 frame đầu
-  → Cần investigate ByteTrack format
-```
-
-### 4.2 Light state verification
-```
-Cần quan sát:
-  - Log mỗi 30 frame: LIGHT: red/yellow/green/unknown
-
-Thế nào là PASS:
-  - ≥70% frames có light_state != UNKNOWN
-  - Light state thay đổi hợp lý (red → yellow → green → red) nếu video đủ dài
-
-Thế nào là FAIL:
-  - >50% frames là UNKNOWN → HSV thresholds cần điều chỉnh
-  - Luôn cùng 1 màu → có thể threshold quá cao hoặc ROI sai
-```
-
-### 4.3 Plate path verification
-```
-Cần quan sát:
-  - Log OCR reads: "plate_text: XX-XX.XXXXX" hoặc "plate_text: (blank)"
-
-Thế nào là PASS:
-  - Plate text non-empty xuất hiện ít nhất 1 lần trên video 30s–1p
-  - Format hợp lý (2-3 ký tự + dash + 4-5 số)
-
-Thế nào là FAIL:
-  - 100% plate_text blank → crop region sai HOẶC plate detector path chưa fix đúng
-  → Verify P1 đã được fix trước
-```
-
-### 4.4 Event detection
-```
-Cần quan sát:
-  - Video có xe vượt đèn đỏ thật không?
-  - Nếu không có → không có event là bình thường
-
-Thế nào là PASS:
-  - Nếu video có ≥1 violation thật:
-    → Có ≥1 event confirmed trong log
-  - Nếu video không có violation:
-    → Có log pending events (nếu xe đi qua stop line khi đỏ)
-
-Thế nào là FAIL:
-  - Xe vượt đèn đỏ thật nhưng không có event confirmed
-  → Violation engine hoặc tracker có vấn đề
-```
-
-### 4.5 Event JSON schema
-```
-Cần kiểm tra:
-  - Mở outputs/events/EVT_0001/event.json
-  - Load bằng Python và kiểm tra types
-
-PASS criteria:
-  - state: str ("pending" hoặc "confirmed")
-  - plate_text: str hoặc None
-  - evidence_image_path: str (file tồn tại)
-  - track_id: int
-```
+- Chua chay full pipeline YOLO/tracking.
+- Chua co debug video tu model.
+- Chua verify light state bang HSV.
+- Chua tao event `pending`.
+- Chua fix plate detector/OCR.
 
 ---
 
-## 5. Acceptance criteria
+## 2. Ordered Work Items
 
-Phase này **hoàn thành** khi TẤT CẢ điều sau đúng:
+### Step 1 — Config validation
 
-| # | Criteria | Method |
-|---|----------|--------|
-| AC1 | Pipeline chạy không crash trên video 30s | `python src/main.py --max-frames 900` → exit code 0 |
-| AC2 | Debug video tạo ra với overlay bbox + track_id | Mở file output bằng VLC/image viewer |
-| AC3 | Log có output từ mỗi stage | Log chứa: detections count, track_id, light_state, plate_text |
-| AC4 | Event JSON có schema đúng | Load JSON, `isinstance(state, str)` |
-| AC5 | ByteTrack verified: track IDs ổn định | Manual review 30s debug video |
-| AC6 | Plate path verified: OCR được gọi | Log chứa plate_text non-empty HOẶC có proof OCR path chạy |
-| AC7 | Biết tracker path có cần đổi không | V1 checklist → có hoặc không |
+**Muc tieu:** pipeline fail early neu camera config sai.
 
-**Điều kiện DỪNG:** Nếu AC1 fail (crash) → quay lại Step 1, kiểm tra video + config.
+Can lam:
+
+- Validate co du key: `camera_id`, `resolution`, `stop_line`, `traffic_light_roi`, `road_roi`, `direction`.
+- Validate `stop_line` co 2 diem.
+- Validate `traffic_light_roi` va `road_roi` co it nhat 4 diem.
+- Validate `direction` chi nhan `forward` hoac `backward`.
+
+Tieu chi xong:
+
+```bash
+python -m json.tool configs/cameras/cam_01.json
+```
+
+va pipeline co error message ro neu config sai.
 
 ---
 
-## 6. Risks and decision gates
+### Step 2 — Fix crossing direction
 
-### Decision Gate 1: Tracker quality
-```
-IF V1 (tracker verification) FAIL:
-  → Ngừng tối ưu các stage khác
-  → Investigate: ByteTrack format? FPS mismatch? Video quality?
-  → Option A: Fix ByteTrack wrapper (nếu format đúng → bug ở integration)
-  → Option B: Thử Ultralytics model.track() (nếu Option A không rõ nguyên nhân)
-  → Option C: IoU-based tracker thủ công (đơn giản hơn, fallback)
+**Muc tieu:** stop-line crossing logic phai ton trong `direction = backward`.
 
-IF V1 PASS:
-  → Giữ ByteTrack wrapper. Tiếp tục.
+Hien tai xe o lane gan camera di len tren anh, tuc la `y` giam. Config da dat:
+
+```json
+"direction": "backward"
 ```
 
-### Decision Gate 2: Light state quality
-```
-IF light state UNKNOWN > 50% frames:
-  → Điều chỉnh HSV thresholds cho video cụ thể
-  → Hoặc dùng manual annotation của light state sequence (nếu cần)
-  → KHÔNG train ML model cho light state ở phase này
+Nhung `ViolationEngine` hien chi flag crossing khi direction la `FORWARD`. Can sua de:
 
-IF light state UNKNOWN < 30%:
-  → HSV approach đủ. Tiếp tục.
-```
+- Neu config `direction = forward`, flag crossing forward.
+- Neu config `direction = backward`, flag crossing backward.
 
-### Decision Gate 3: Plate path
-```
-IF plate text blank 100% frames sau khi P1 fixed:
-  → Verify crop region
-  → Thử PaddleOCR trực tiếp trên toàn bộ vehicle bbox (không chỉ vùng dưới)
-  → Thử pretrained plate detector model
+Tieu chi xong:
 
-IF plate text xuất hiện:
-  → OCR path hoạt động. Tiếp tục.
-```
+- Unit test co case `backward` crossing.
+- Event logic khong hard-code `CrossingDirection.FORWARD`.
 
 ---
 
-## 7. What NOT to do yet
+### Step 3 — Runtime dependencies
 
-Danh sách việc **CHƯA NÊN LÀM** trong phase này:
+**Muc tieu:** moi truong co du dependency de chay pipeline.
 
-| # | Việc chưa làm | Lý do |
-|---|---------------|-------|
-| N1 | Train YOLO / fine-tune plate detector | Chưa có baseline để đánh giá pretrained đủ hay không |
-| N2 | Thay ByteTrack → BoT-SORT | Chưa verify ByteTrack fail |
-| N3 | Thay HSV → ML traffic light detector | HSV có thể đủ. Chỉ thay khi <50% frames có light state |
-| N4 | Thêm nhiều camera / multi-camera support | MVP chỉ 1 camera |
-| N5 | Tối ưu FPS / batch inference | Chưa baseline → không có baseline FPS để so sánh |
-| N6 | Thêm xe máy vào scope | MVP chỉ ô tô |
-| N7 | Thêm real-time streaming | MVP offline |
-| N8 | Chuyển JSON → SQLite | JSON đủ cho baseline |
-| N9 | Homography / camera calibration | Over-engineer |
-| N10 | Refactor lớn module structure | Cấu trúc hiện tại đủ tốt. Không refactor khi chưa validate |
+Can co:
+
+- `opencv-python` hoac `opencv-python-headless`.
+- `ultralytics`.
+- tracker dependency hoac fallback tracker.
+- `shapely`.
+- `pyyaml`.
+
+Luu y: da tao `.venv` local de xu ly video Layer 1 va cai `opencv-python-headless`. `.venv` duoc gitignore.
+
+---
+
+### Step 4 — Layer 2 debug run
+
+**Muc tieu:** tao debug video co overlay.
+
+Command muc tieu:
+
+```bash
+python src/main.py \
+  --video data/raw_videos/clips/cam_01_clip_001.mp4 \
+  --camera configs/cameras/cam_01.json \
+  --output outputs/debug_videos/cam_01_layer2_debug.mp4 \
+  --max-frames 900
+```
+
+Can verify trong debug video:
+
+- Bbox xe dung.
+- Track ID on dinh.
+- Stop line dung vi tri.
+- Traffic light ROI dung vi tri.
+- FPS/log khong qua cham.
+
+---
+
+### Step 5 — Light state verification
+
+**Muc tieu:** biet HSV ROI co doc duoc den khong.
+
+Can log moi 30 frame:
+
+```text
+frame=300 light_state=red confidence=0.82
+```
+
+Tieu chi tam chap nhan:
+
+- Light state khong bi `unknown` qua nhieu.
+- Neu ROI nho/sai, dieu chinh `traffic_light_roi` truoc khi doi model.
+
+---
+
+### Step 6 — Event baseline ✅ Done
+
+**Muc tieu:** tao event `pending` khi xe cat vach trong dieu kien den do.
+
+Da lam:
+
+- Chay crossing logic tren tracked vehicles.
+- Tao pending event.
+- Log event id, track id, frame index.
+- Luu `event.json` va `frame.jpg` cho moi pending event.
+- Tao `outputs/reports/layer3_event_report.json`.
+- Tao `outputs/reports/layer3_event_contact.jpg`.
+- Tao `data/annotations/cam_01_events.json` de review tay.
+
+Ket qua hien tai:
+
+```text
+EVT_0001 frame=98
+EVT_0002 frame=162
+EVT_0003 frame=625
+EVT_0004 frame=805
+```
+
+Precision/recall chua duoc tinh vi can dien ground truth thu cong truoc.
+
+---
+
+### Step 7 — Plate/OCR fix sau baseline ✅ Done
+
+**Muc tieu:** sau khi detection/tracking/event logic chay, moi fix OCR.
+
+Van de da xu ly:
+
+- `PlateDetector` khong con dung `yolov8n.pt` nhu plate detector gia.
+- Neu chua co weight plate detector, pipeline dung crop heuristic theo bbox xe.
+- `main.py` da co `--enable-ocr`, `--ocr-backend`, `--plate-detector-model`, `--events-dir`, `--layer4-report`.
+- Evidence da luu duoc `frame.jpg`, `plate.jpg`, `clip.mp4`, `event.json`.
+- HyperLPR3 doc duoc 3/4 event candidate tren 900 frame dau.
+
+Dataset da san sang:
+
+```text
+data/processed/ccpd_layer4/ccpd_plate.yaml
+data/processed/ccpd_layer4/ocr_labels/train.txt
+data/processed/ccpd_layer4/manifest.json
+```
+
+Ket qua hien tai:
+
+```text
+outputs/events_layer4/
+outputs/reports/layer4_ocr_report.json
+outputs/reports/layer4_evidence_contact.jpg
+```
+
+Huong nang cap:
+
+1. Train/fine-tune YOLO plate detector tren compact CCPD subset.
+2. Gan weight plate detector vao `configs/default.yaml`.
+3. Tang manual labels de tinh Plate Accuracy that.
+
+---
+
+## 3. File Patch Plan
+
+| File | Viec can lam | Uu tien |
+|---|---|---|
+| `src/geometry/line_crossing.py` | Dam bao direction forward/backward duoc tinh ro | High |
+| `src/violation/violation_engine.py` | Khong hard-code crossing direction la forward | High |
+| `src/main.py` | Validate config, log debug info, ve ROI | High |
+| `src/evidence/evidence_builder.py` | Serialize event JSON tường minh, khong overwrite frame path | Medium |
+| `src/plate/plate_detector.py` | Nhan model path dung cho plate | Medium |
+| `src/plate/fusion.py` | Fix `total_frames` semantics | Low |
+
+---
+
+## 4. Acceptance Criteria
+
+Baseline phase duoc xem la xong khi:
+
+| # | Criteria |
+|---|---|
+| AC1 | Pipeline chay tren `cam_01_clip_001.mp4` khong crash |
+| AC2 | Tao duoc debug video |
+| AC3 | Debug video co bbox + track_id |
+| AC4 | Stop line va traffic light ROI hien dung vi tri |
+| AC5 | Direction `backward` duoc xu ly dung |
+| AC6 | Light state duoc log |
+| AC7 | Co event pending neu co xe cat vach luc den do |
+| AC8 | Event JSON load duoc va `state` la string |
+
+---
+
+## 5. Decision Gates
+
+### Tracker
+
+Neu track ID nhay lien tuc:
+
+1. Kiem tra format input/output cua tracker.
+2. Kiem tra FPS va min box area.
+3. Neu ByteTrack kho cai/chay, dung fallback tracker IoU don gian de co baseline.
+
+### Traffic light
+
+Neu light state sai:
+
+1. Sua `traffic_light_roi`.
+2. Dieu chinh HSV threshold.
+3. Chi dung dataset/model traffic light khi HSV khong du.
+
+### Plate OCR
+
+Neu OCR blank:
+
+1. Thu crop vehicle bbox.
+2. Thu crop vung duoi bbox.
+3. Thu backend phu hop domain: HyperLPR3 cho bien Trung Quoc, PaddleOCR/EasyOCR cho fallback.
+4. Sau do moi fine-tune plate detector rieng de crop on dinh hon.
+
+---
+
+## 6. Khong lam luc nay
+
+- Chua train YOLO tu dau.
+- Chua them multi-camera logic.
+- Chua them xe may.
+- Chua realtime streaming.
+- Chua chuyen JSON sang database.
+- Chua toi uu FPS truoc khi co baseline.

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -40,6 +41,16 @@ class EventStore:
         self._index[event.event_id] = self._event_to_dict(event)
         self._save_index()
 
+    def max_event_number(self) -> int:
+        """Return the largest numeric EVT id currently stored."""
+        max_number = 0
+        pattern = re.compile(r"^EVT_(\d+)$")
+        for event_id in self._index:
+            match = pattern.match(event_id)
+            if match:
+                max_number = max(max_number, int(match.group(1)))
+        return max_number
+
     def load(self, event_id: str) -> Optional[ViolationEvent]:
         """Load an event by ID."""
         if event_id not in self._index:
@@ -65,20 +76,7 @@ class EventStore:
         return [e for e in self.all_events() if e.state == EventState.CONFIRMED]
 
     def _event_to_dict(self, event: ViolationEvent) -> dict:
-        return {
-            "event_id": event.event_id,
-            "track_id": event.track_id,
-            "frame_idx": event.frame_idx,
-            "state": event.state.value,
-            "plate_text": event.plate_text,
-            "plate_confidence": event.plate_confidence,
-            "evidence_image_path": event.evidence_image_path,
-            "evidence_clip_path": event.evidence_clip_path,
-            "camera_id": event.camera_id,
-            "violation_type": event.violation_type,
-            "vehicle_type": event.vehicle_type,
-            "timestamp": event.timestamp,
-        }
+        return event.to_dict()
 
     def _dict_to_event(self, data: dict) -> ViolationEvent:
         return ViolationEvent(
@@ -88,10 +86,24 @@ class EventStore:
             state=EventState(data["state"]),
             plate_text=data.get("plate_text"),
             plate_confidence=data.get("plate_confidence"),
+            plate_bbox=tuple(data["plate_bbox"]) if data.get("plate_bbox") else None,
+            plate_detection_confidence=data.get("plate_detection_confidence"),
+            plate_detection_source=data.get("plate_detection_source"),
+            ocr_backend=data.get("ocr_backend"),
+            ocr_votes=data.get("ocr_votes"),
+            ocr_frame_count=data.get("ocr_frame_count", 0),
             evidence_image_path=data.get("evidence_image_path"),
+            plate_crop_path=data.get("plate_crop_path"),
             evidence_clip_path=data.get("evidence_clip_path"),
             camera_id=data.get("camera_id", "CAM_01"),
             violation_type=data.get("violation_type", "red_light_crossing"),
             vehicle_type=data.get("vehicle_type", "car"),
             timestamp=data.get("timestamp"),
+            light_state=data.get("light_state"),
+            light_confidence=data.get("light_confidence"),
+            crossing_direction=data.get("crossing_direction"),
+            point_before=tuple(data["point_before"]) if data.get("point_before") else None,
+            point_after=tuple(data["point_after"]) if data.get("point_after") else None,
+            vehicle_bbox=tuple(data["vehicle_bbox"]) if data.get("vehicle_bbox") else None,
+            notes=data.get("notes", ""),
         )

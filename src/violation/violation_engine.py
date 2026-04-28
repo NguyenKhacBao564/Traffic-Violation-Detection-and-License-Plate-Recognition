@@ -42,6 +42,7 @@ class ViolationEngine:
         self.config = config or ViolationEngineConfig()
         self.event_manager = EventStateManager()
         self.camera_id = camera_id
+        self.last_light_state: LightState | None = None
 
         # Track previous positions for each track_id
         self._prev_positions: dict[int, tuple[int, int]] = {}
@@ -61,6 +62,7 @@ class ViolationEngine:
 
         # 1. Estimate light state
         light_state = self.light_estimator.estimate(frame, frame_idx)
+        self.last_light_state = light_state
         is_red = light_state.color == LightColor.RED
 
         active_track_ids = {t.track_id for t in tracked_vehicles}
@@ -90,13 +92,24 @@ class ViolationEngine:
                 tid, prev_pos, curr_pos, frame_idx
             )
 
-            if crossing and crossing.direction == CrossingDirection.FORWARD:
+            if crossing and crossing.direction == self.stop_line_checker.expected_direction:
                 # Only flag if this track hasn't already been flagged
                 if tid not in self.event_manager.pending_events:
                     # Only create event if track has been seen long enough
                     if self._track_seen_frames[tid] >= self.config.min_tracking_frames:
                         if is_red or not self.config.require_red_light:
-                            self.event_manager.create_pending(tid, frame_idx, self.camera_id)
+                            event = self.event_manager.create_pending(
+                                tid,
+                                frame_idx,
+                                self.camera_id,
+                                light_state=light_state.color.value,
+                                light_confidence=light_state.confidence,
+                                crossing_direction=crossing.direction.value,
+                                point_before=crossing.point_before,
+                                point_after=crossing.point_after,
+                                vehicle_bbox=vehicle.bbox,
+                            )
+                            newly_confirmed.append(event)
 
             self._prev_positions[tid] = curr_pos
 

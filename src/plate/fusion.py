@@ -1,11 +1,7 @@
 """Temporal OCR fusion — vote best plate text across multiple frames."""
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass, field
-from typing import Optional
-
-import numpy as np
 
 
 @dataclass
@@ -35,6 +31,16 @@ class OCRFusion:
         if text and len(text) >= 3:  # ignore very short/empty readings
             self._readings.append((text, confidence))
 
+    @property
+    def reading_count(self) -> int:
+        """Number of usable OCR readings collected so far."""
+        return len(self._readings)
+
+    @property
+    def is_ready(self) -> bool:
+        """Return True when enough readings have been collected for voting."""
+        return self.reading_count >= self.vote_frames
+
     def fuse(self) -> FusionResult:
         """
         Compute the fused result from collected readings.
@@ -43,7 +49,9 @@ class OCRFusion:
         if not self._readings:
             return FusionResult(final_text="", confidence=0.0, total_frames=0, votes={})
 
-        # Weighted vote: each reading contributes confidence points
+        reading_count = len(self._readings)
+
+        # Weighted vote: each reading contributes confidence points.
         vote_scores: dict[str, float] = {}
         for text, conf in self._readings:
             vote_scores[text] = vote_scores.get(text, 0.0) + conf
@@ -61,7 +69,7 @@ class OCRFusion:
         return FusionResult(
             final_text=best_text,
             confidence=min(final_conf, 1.0),
-            total_frames=len(self._readings) if not self._readings else len(vote_scores),
+            total_frames=reading_count,
             votes=votes,
         )
 

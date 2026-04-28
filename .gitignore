@@ -16,22 +16,60 @@ yolov8x.pt
 runs/
 
 # Large data — never push
+data/raw/
 data/raw_videos/
+data/external/
+data/interim/
 data/frames/
 data/annotations/
 data/samples/
+data/processed/
+CCPD2019/
+CCPD2019.tar.xz
+*.tar
+*.tar.gz
+*.tar.xz
+*.tgz
+*.gz
+*.bz2
+*.xz
+*.zip
+*.zip.*
+*.rar
+*.7z
+*.zst
+AICity23_Track2_NL_Retrieval/
+CULane/
+driver_37_30frame/
+ua_detrac_test_set/
+ua_detrac_training_set/
+datasets/
 
 # Model weights
 models/detectors/
 models/plate_detector/
 models/ocr/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.weights
+*.bin
+*.tflite
+*.pb
+*.mlmodel
 
 # Output artifacts
 outputs/debug_videos/
 outputs/events/
+outputs/events_layer4/
 outputs/logs/
+outputs/reports/
 *.mp4
+*.mov
 *.avi
+*.mkv
+*.webm
 *.jpg
 *.png
 

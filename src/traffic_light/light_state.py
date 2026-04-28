@@ -90,11 +90,67 @@ class TrafficLightEstimator:
                 best_color = color
 
         if best_color == LightColor.UNKNOWN:
+            fallback = self._estimate_overexposed_bulb(frame, mask, frame_idx)
+            if fallback.color != LightColor.UNKNOWN:
+                self._last_state = fallback.color
+                return fallback
             return LightState(color=self._last_state, confidence=0.0, frame_idx=frame_idx)
 
         confidence = min(best_score / 500, 1.0)
         self._last_state = best_color
         return LightState(color=best_color, confidence=confidence, frame_idx=frame_idx)
+
+    def _estimate_overexposed_bulb(
+        self, frame: np.ndarray, roi_mask: np.ndarray, frame_idx: int
+    ) -> LightState:
+        """
+        Fallback for CCTV footage where the active lamp is overexposed white.
+
+        Fixed traffic lights usually arrange bulbs vertically: red on top, yellow
+        in the middle, green at the bottom. If color thresholding fails, detect
+        the brightest blob inside the ROI and infer state from its vertical
+        position.
+        """
+        x, y, w, h = cv2.boundingRect(self.roi)
+        if w <= 0 or h <= 0:
+            return LightState(LightColor.UNKNOWN, 0.0, frame_idx)
+
+        crop = frame[y:y + h, x:x + w]
+        crop_mask = roi_mask[y:y + h, x:x + w]
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        value = hsv[:, :, 2]
+
+        bright = cv2.inRange(value, 185, 255)
+        bright = cv2.bitwise_and(bright, bright, mask=crop_mask)
+        bright = cv2.morphologyEx(
+            bright,
+            cv2.MORPH_OPEN,
+            np.ones((3, 3), dtype=np.uint8),
+        )
+
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(bright)
+        best_idx = None
+        best_area = 0
+        for idx in range(1, num_labels):
+            area = int(stats[idx, cv2.CC_STAT_AREA])
+            if area > best_area:
+                best_area = area
+                best_idx = idx
+
+        if best_idx is None or best_area < 8:
+            return LightState(LightColor.UNKNOWN, 0.0, frame_idx)
+
+        _, cy = centroids[best_idx]
+        rel_y = cy / max(h, 1)
+        if rel_y < 0.38:
+            color = LightColor.RED
+        elif rel_y < 0.65:
+            color = LightColor.YELLOW
+        else:
+            color = LightColor.GREEN
+
+        confidence = min(best_area / 120.0, 1.0)
+        return LightState(color=color, confidence=confidence, frame_idx=frame_idx)
 
     @staticmethod
     def draw_roi(frame: np.ndarray, roi: list[list[int]], light_state: LightColor) -> None:

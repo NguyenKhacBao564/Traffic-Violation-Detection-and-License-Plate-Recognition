@@ -1,6 +1,6 @@
 {
-  "camera_id": "CAM_01",
-  "camera_name": "Layer 1 traffic demo camera 01",
+  "camera_id": "CAM_03",
+  "camera_name": "Layer 1 traffic demo camera 03",
   "resolution": {
     "width": 1342,
     "height": 1008
@@ -23,5 +23,5 @@
     [696, 122]
   ],
   "direction": "backward",
-  "notes": "Initial estimate from data/frames/references/cam_01_reference_005s.jpg. Vehicles in near lanes move upward in image coordinates, so direction is backward and violation logic must respect this direction."
+  "notes": "Initial estimate copied from CAM_01 because all Layer 1 videos share the same fixed-camera scene. Verify on reference frames before final evaluation."
 }
