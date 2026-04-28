@@ -99,7 +99,7 @@ Tao duoc event `pending` khi xe cat stop line trong dieu kien den do.
 - [x] Luu snapshot `frame.jpg` cho moi event.
 - [x] Tao Layer 3 report.
 - [x] Tao event contact sheet de review.
-- [x] Tao file annotation `cam_01_events.json` dang `needs_manual_review`.
+- [x] Tao va dien file annotation `cam_01_events.json` theo configured stop-line rule.
 - [ ] Dien ground truth thu cong va tinh precision/recall.
 
 ### Deliverable
@@ -139,7 +139,7 @@ Doc bien so xe vi pham va luu bang chung.
 - [x] Luu `clip.mp4` cho event da confirmed.
 - [x] Tao `outputs/reports/layer4_ocr_report.json`.
 - [x] Tao `outputs/reports/layer4_evidence_contact.jpg`.
-- [ ] Train/fine-tune YOLO plate detector tu `data/processed/ccpd_layer4/ccpd_plate.yaml` de tang do ben.
+- [x] Train/fine-tune YOLO plate detector tu `data/processed/ccpd_layer4/ccpd_plate.yaml` de tang do ben.
 
 ### Deliverable
 
@@ -155,20 +155,23 @@ outputs/reports/layer4_evidence_contact.jpg
 
 ### Ket qua baseline
 
-Tren 900 frame dau cua `cam_01_clip_001.mp4`:
+Tren full 60s `cam_01_clip_001.mp4` sau khi dung YOLO plate detector da fine-tune:
 
 | Metric | Ket qua |
 |---|---:|
-| Violation candidates | 4 |
-| Events co `plate.jpg` | 4 |
-| OCR confirmed | 3 |
-| Processing FPS | ~16.3 |
+| Violation candidates | 5 |
+| Events co `plate.jpg` | 5 |
+| OCR confirmed | 4 |
+| Processing FPS | ~19.5 |
+| Plate detector backend | YOLO |
 
-Luu y: OCR confidence con thap, nen cac bien so doc duoc can manual review truoc khi tinh Plate Accuracy.
+Training detector bien so tren compact CCPD dat precision `0.989`, recall `0.998`, mAP50 `0.994`, mAP50-95 `0.73`. Luu y: model weight local nam o `models/plate_detector/ccpd_yolov8n_best.pt` va bi ignore khoi Git.
+
+Luu y: OCR confidence con thap va crop bien so tren video that qua nho/mo, nen Plate Accuracy exact van can ground truth doc duoc bang mat.
 
 ---
 
-## Layer 5 — Evaluation & Portfolio Polish
+## Layer 5 — Evaluation & Portfolio Polish ✅ Baseline Done
 
 ### Muc tieu
 
@@ -176,17 +179,38 @@ Bien project thanh main project CV co demo va metric that.
 
 ### Tasks
 
-- [ ] Tinh Event Precision.
-- [ ] Tinh Event Recall.
-- [ ] Tinh Plate Accuracy tren event co bien so doc duoc.
-- [ ] Do processing FPS.
-- [ ] Lam GIF/video demo da blur bien so.
-- [ ] Cap nhat README voi lenh chay va ket qua.
-- [ ] Dam bao clone/setup chay lai duoc.
+- [x] Tao `scripts/evaluate_layer5.py`.
+- [x] Tao `data/annotations/cam_01_layer5_review.json`.
+- [x] Tao `outputs/reports/layer5_evaluation_report.json`.
+- [x] Do processing FPS tu Layer 4 report.
+- [x] Tao demo contact/video da blur bien so.
+- [x] Cap nhat README voi lenh chay va ket qua hien co.
+- [x] Dam bao test suite pass trong moi truong hien tai.
+- [x] Dien manual review de tinh Event Precision theo configured stop-line rule.
+- [ ] Dien manual plate ground truth de tinh Plate Accuracy.
+- [ ] Tao full timeline ground truth neu muon tinh Event Recall.
 
 ### Deliverable
 
-README co demo, metric va giai thich pipeline ngan gon.
+```text
+data/annotations/cam_01_layer5_review.json
+outputs/reports/layer5_evaluation_report.json
+outputs/reports/layer5_demo_contact_redacted.jpg
+outputs/debug_videos/layer5_demo_redacted.mp4
+```
+
+### Ket qua baseline
+
+| Metric | Ket qua |
+|---|---:|
+| Events co full frame | 5/5 |
+| Events co plate crop | 5/5 |
+| Events co clip | 4/5 |
+| Events co OCR text | 4/5 |
+| Processing FPS | ~19.5 |
+| Event Precision | 5/5 = 1.0 |
+
+Event Precision o day chi tinh theo configured stop-line rule cua project, khong phai ket luan phap ly vi chua model lane-specific right-turn permissions. Plate Accuracy chua report vi plate crop qua nho/mo de tao manual `plate_text_gt` dang tin. Event Recall van can full timeline ground truth.
 
 ---
 
@@ -200,3 +224,5 @@ README co demo, metric va giai thich pipeline ngan gon.
 | 2026-04-28 | Hoan thanh Layer 3 baseline: pending event JSON, event snapshots, report, annotation file can review |
 | 2026-04-28 | Chuan hoa CCPD2019 thanh compact dataset cho Layer 4 plate detection/OCR |
 | 2026-04-28 | Hoan thanh Layer 4 baseline: plate crop, HyperLPR OCR, evidence clip/json, Layer 4 report |
+| 2026-04-28 | Hoan thanh Layer 5 baseline: evaluation script, review template, redacted demo assets, evidence metrics |
+| 2026-04-28 | Fine-tune YOLO plate detector tren compact CCPD va review Layer 5 event precision theo configured stop-line rule |

@@ -6,7 +6,7 @@ model:
   vehicle_iou: 0.4
   vehicle_classes: [2]  # class 2 = car in COCO
 
-  plate_detector_model: plate_detector.pt
+  plate_detector_model: models/plate_detector/ccpd_yolov8n_best.pt
   plate_conf: 0.4
   plate_fallback: true
 

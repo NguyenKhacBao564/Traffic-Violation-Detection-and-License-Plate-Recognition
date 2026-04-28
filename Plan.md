@@ -100,9 +100,9 @@ outputs/reports/layer3_event_contact.jpg
 data/annotations/cam_01_events.json
 ```
 
-Precision/recall are still pending because `data/annotations/cam_01_events.json` needs manual labels.
+The predicted Layer 3 events have been reviewed under the configured stop-line rule. Recall still needs full timeline ground truth because candidate-only review cannot count missed violations.
 
-### Layer 4 — Plate OCR & Evidence ✅ Baseline done
+### Layer 4 — Plate OCR & Evidence ✅ Improved baseline done
 
 Purpose: attach plate text and evidence files to confirmed events.
 
@@ -119,12 +119,13 @@ CCPD2019 is only needed as a source for this compact subset. After conversion, t
 Tasks:
 
 - Avoid using COCO YOLO as a plate detector.
-- Use a heuristic vehicle/plate crop fallback when no trained plate model exists.
+- Fine-tune a one-class YOLO plate detector on the compact CCPD subset.
+- Use a heuristic vehicle/plate crop fallback when the trained plate model is missing.
 - Run OCR with HyperLPR3 for the current Chinese plate video.
 - Fuse OCR readings across frames.
 - Save `frame.jpg`, `plate.jpg`, `clip.mp4`, and `event.json`.
 
-Current result on 900 frames:
+Current result on the full 60-second CAM_01 clip:
 
 ```text
 outputs/events_layer4/
@@ -132,7 +133,7 @@ outputs/reports/layer4_ocr_report.json
 outputs/reports/layer4_evidence_contact.jpg
 ```
 
-The robust upgrade is to fine-tune a one-class YOLO plate detector on `data/processed/ccpd_layer4/ccpd_plate.yaml`.
+Summary: 5 predicted events, 5 plate crops, 4 OCR texts, ~19.5 FPS. The trained local plate detector exported to `models/plate_detector/ccpd_yolov8n_best.pt` and reached mAP50 ~0.994 on the compact CCPD validation split.
 
 ### Layer 5 — Evaluation & Portfolio Polish
 
@@ -140,10 +141,26 @@ Purpose: make the project CV-ready.
 
 Tasks:
 
-- Measure Event Precision, Event Recall, Plate Accuracy, FPS.
-- Create anonymized demo GIF/video.
+- Measure evidence readiness and FPS from Layer 4 outputs.
+- Create manual review template for Event Precision and Plate Accuracy.
+- Create anonymized demo image/video.
 - Update README with results.
 - Keep raw/private video files out of Git.
+
+Current outputs:
+
+```text
+data/annotations/cam_01_layer5_review.json
+outputs/reports/layer5_evaluation_report.json
+outputs/reports/layer5_demo_contact_redacted.jpg
+outputs/debug_videos/layer5_demo_redacted.mp4
+```
+
+Current reviewed status:
+
+- Event Precision: 5/5 = 1.0 under the configured stop-line rule.
+- Plate Accuracy: pending because the event plate crops are visible but too small/blurred for reliable human plate-text ground truth.
+- Event Recall: pending until a full timeline ground truth file exists.
 
 ---
 
@@ -180,19 +197,19 @@ Input Video
 
 ## 6. Immediate Next Steps
 
-1. Fill manual labels in `data/annotations/cam_01_events.json`.
-2. Optionally train or fine-tune plate detector on:
+1. Create full timeline ground truth if event recall is required.
+2. Improve OCR/plate readability, either by better plate crop selection or a dedicated OCR dataset.
+3. Replace the IoU tracker fallback with ByteTrack/BoT-SORT for fewer ID-switch risks.
+4. Add lane-specific logic for right-turn permissions before claiming legal traffic-enforcement accuracy.
+
+Already completed plate detector training command:
 
 ```bash
-yolo detect train \
-  model=yolov8n.pt \
-  data=data/processed/ccpd_layer4/ccpd_plate.yaml \
-  epochs=30 \
-  imgsz=640
+python scripts/train_plate_detector.py \
+  --epochs 6 \
+  --patience 3 \
+  --device mps
 ```
-
-3. Fill manual labels for Layer 3/4 events.
-4. Report event and plate metrics after manual review.
 
 ---
 

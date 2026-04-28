@@ -227,20 +227,26 @@ Muc dich:
 
 ---
 
-## 8. Buoc tiep theo
+## 8. Bước tiếp theo
 
-Thu tu tiep theo nen lam:
+Các bước dưới đây đã hoàn thành trong Layer 2–5:
 
-1. Sua `ViolationEngine` de crossing direction dung voi `backward`.
-2. Chay detection/tracking tren `cam_01_clip_001.mp4`.
-3. Tao debug video co bbox, track_id, stop line, traffic light ROI.
-4. Kiem tra traffic light HSV co nhan dung mau den khong.
-5. Annotate event trong `cam_01_events_template.json`.
-6. Train/fix plate detector bang `data/processed/ccpd_layer4`.
-7. Gan detector/OCR vao event evidence cua Layer 4.
+- [x] Sửa `ViolationEngine` crossing direction cho `backward`.
+- [x] Chạy detection/tracking trên `cam_01_clip_001.mp4`.
+- [x] Tạo debug video có bbox, track_id, stop line, traffic light ROI.
+- [x] Kiểm tra traffic light HSV.
+- [x] Train plate detector bằng `data/processed/ccpd_layer4`.
+- [x] Gắn detector/OCR vào event evidence (Layer 4).
+- [x] Tạo evaluation report + demo assets (Layer 5).
+
+Việc còn lại:
+
+- [ ] Annotate event ground truth đầy đủ cho Event Recall.
+- [ ] Cải thiện plate crop quality để tính Plate Accuracy.
+- [ ] Xoá raw `CCPD2019/` và `CCPD2019.tar.xz` nếu không cần nữa.
 
 ---
 
-## 9. Ket luan
+## 9. Kết luận
 
-Layer 1 da dat muc tieu: raw videos da duoc bien thanh clip test, frame tham chieu, overlay, config va metadata. Layer 4 cung da co compact CCPD subset de train/thu plate detection/OCR ma khong can giu raw CCPD full.
+Layer 1 đã đạt mục tiêu: raw videos → clip test, frame tham chiếu, overlay, config, metadata. Layer 4 cũng đã có compact CCPD subset để train/thử plate detection/OCR mà không cần giữ raw CCPD full.

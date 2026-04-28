@@ -1,1250 +1,514 @@
 # Traffic Violation Detection & License Plate Recognition
 
-## Tai lieu giai thich du an theo goc nhin giang vien
+## Tài liệu hướng dẫn chi tiết dự án
 
-> Muc tieu cua tai lieu nay: giup nguoi moi hoc AI/CV hieu duoc du an dang giai quyet bai toan gi, pipeline xu ly video hoat dong ra sao, vi sao chon cac cong nghe hien tai, va can hoan thien tung buoc nhu the nao de bien repo thanh mot main project co the dua vao CV.
-
----
-
-## Trang thai hien tai sau Layer 4 baseline
-
-Du an hien da hoan thanh baseline cho Layer 1, Layer 2, Layer 3 va Layer 4.
-
-Layer 1 da chuan bi du lieu:
-
-- Da co 3 raw videos trong `data/raw_videos/`.
-- Da cat 3 clip 60 giay, 30 FPS trong `data/raw_videos/clips/`.
-- Da tao reference frames va contact sheet trong `data/frames/references/`.
-- Da tao scene overlays de xem stop line, road ROI va traffic light ROI.
-- Da tao `data/annotations/layer1_inventory.json`.
-- Da tao `data/annotations/cam_01_events_template.json`.
-- Da cap nhat camera configs `cam_01.json`, `cam_02.json`, `cam_03.json`.
-
-Layer 2 da chay detection/tracking/overlay:
-
-- Da tao debug video voi bbox, track ID, stop line, road ROI, traffic light ROI.
-- Da dung tracker fallback IoU vi ByteTrack chua cai.
-- Da log traffic light state.
-
-Layer 3 da tao event baseline:
-
-- Da tao 4 pending red-light crossing candidates tren 900 frame dau cua `cam_01_clip_001.mp4`.
-- Da luu `event.json` va `frame.jpg` cho tung event trong `outputs/events/`.
-- Da tao `outputs/reports/layer3_event_report.json`.
-- Da tao `outputs/reports/layer3_event_contact.jpg`.
-- Da tao `data/annotations/cam_01_events.json` de dien ground truth bang tay.
-
-Layer 4 da co dataset bien so va evidence OCR:
-
-- Da convert CCPD2019 thanh `data/processed/ccpd_layer4`.
-- Da tao YOLO labels cho plate detector.
-- Da tao `ocr_crops` va `ocr_labels` cho OCR.
-- Da tao `manifest.json` de truy vet nguon tung anh.
-- Da tao `outputs/reports/ccpd_layer4_sample_contact.jpg` de review nhanh.
-- Raw `CCPD2019/` va archive `CCPD2019.tar.xz` khong can giu nua sau khi da convert.
-- Da chay Layer 4 tren 900 frame dau cua `cam_01_clip_001.mp4`.
-- Da tao 4 event co `plate.jpg`.
-- Da confirmed OCR 3/4 event bang HyperLPR3.
-- Da luu `clip.mp4` cho cac event confirmed.
-- Da tao `outputs/reports/layer4_ocr_report.json`.
-
-Buoc tiep theo la review ground truth cho Layer 3/4, sau do tinh metric that. Fine-tune YOLO plate detector tren subset Layer 4 la huong nang cap de crop bien so on dinh hon.
+> **Mục tiêu:** Giúp bạn hiểu rõ dự án đang giải quyết bài toán gì, pipeline xử lý video hoạt động ra sao, vì sao chọn các công nghệ hiện tại, và cần hoàn thiện từng bước nào để biến repo thành project chính đưa vào CV.
 
 ---
 
-## 1. Tong quan du an
+## Trạng thái hiện tại
 
-### 1.1. Bai toan can giai quyet
+Dự án đã hoàn thành baseline cho tất cả 5 Layer trên video `cam_01_clip_001.mp4`.
 
-Du an **Traffic Violation Detection & License Plate Recognition** xay dung mot he thong xu ly video tu camera giao thong co dinh. He thong co ba nhiem vu chinh:
+- **Layer 1 ✅** — 3 clip 60s, reference frames, camera config.
+- **Layer 2 ✅** — YOLO detection + IoU tracker + debug video.
+- **Layer 3 ✅** — 4 pending red-light crossing events, report, annotation.
+- **Layer 4 ✅** — Fine-tuned YOLO plate detector, 5 events, 4 OCR texts, ~19.5 FPS.
+- **Layer 5 ✅** — Evaluation script, review template, demo đã blur. Event Precision 5/5.
 
-1. Phat hien xe o to trong video.
-2. Xac dinh xe co vuot vach dung khi den do hay khong.
-3. Doc bien so xe vi pham va luu bang chung gom anh, video clip va metadata.
+---
 
-Noi mot cach de hieu: neu co mot video quay nga tu, he thong se xem tung frame, tim xe, theo doi xe qua thoi gian, kiem tra trang thai den giao thong, kiem tra xe co cat qua vach dung luc den do hay khong, sau do cat bien so va luu lai bang chung.
+## 1. Tổng quan dự án
 
-### 1.2. Pham vi MVP
+### 1.1. Bài toán cần giải quyết
 
-MVP la phien ban nho nhat nhung co gia tri de demo. Du an nay dang scope theo huong rat hop ly:
+Dự án xây dựng hệ thống xử lý video từ camera giao thông cố định với ba nhiệm vụ:
 
-| Hang muc | Pham vi hien tai |
+1. **Phát hiện xe ô tô** trong video.
+2. **Xác định xe có vượt vạch dừng khi đèn đỏ** hay không.
+3. **Đọc biển số xe vi phạm** và lưu bằng chứng (ảnh, clip, metadata).
+
+Nói đơn giản: hệ thống xem từng frame video ngã tư, tìm xe, theo dõi xe qua thời gian, kiểm tra đèn giao thông, kiểm tra xe có cắt qua vạch dừng lúc đèn đỏ không, rồi crop biển số và lưu bằng chứng.
+
+### 1.2. Phạm vi MVP
+
+| Hạng mục | Phạm vi |
 |---|---|
-| Loai camera | 1 camera co dinh |
-| Loai video | Offline, video ban ngay |
-| Doi tuong | O to |
-| Loai vi pham | Vuot den do / vuot vach dung |
-| Dau ra | Anh bang chung, clip bang chung, JSON metadata |
-| Luu tru | File JSON |
+| Camera | 1 camera cố định |
+| Video | Offline, ban ngày |
+| Đối tượng | Ô tô |
+| Vi phạm | Vượt đèn đỏ / vượt vạch dừng |
+| Đầu ra | Ảnh, clip, JSON metadata |
 
-Nhung thu tam thoi **khong** nen lam o MVP:
+Không nằm trong MVP: realtime, multi-camera, xe máy, đêm/mưa, hệ thống phạt nguội thật, training model lớn từ đầu.
 
-- Xu ly realtime streaming.
-- Nhieu camera cung luc.
-- Xe may, xe dap, nguoi di bo.
-- Dem, mua lon, camera rung.
-- Ket noi voi he thong phat nguoi that.
-- Training model lon tu dau.
-
-Day la cach scope dung, vi voi mot du an portfolio, muc tieu khong phai la lam he thong production toan dien, ma la chung minh ban hieu pipeline AI end-to-end va co kha nang bien y tuong thanh san pham demo duoc.
+Đây là scope đúng cho portfolio: chứng minh bạn hiểu pipeline AI end-to-end, không phải làm production system.
 
 ---
 
-## 2. Vi sao du an nay hop de dua vao CV?
+## 2. Vì sao dự án này hợp để đưa vào CV?
 
-Du an nay manh hon nhieu project AI co ban vi no khong chi dung mot model de predict anh. No yeu cau ket hop nhieu nhom ky nang:
+Dự án này mạnh hơn project AI cơ bản vì kết hợp nhiều nhóm kỹ năng:
 
-| Nhom ky nang | The hien trong du an |
+| Nhóm kỹ năng | Thể hiện trong dự án |
 |---|---|
-| Computer Vision | Vehicle detection, license plate detection, traffic light ROI |
-| Multi-object tracking | Gan `track_id` cho xe qua nhieu frame |
-| Xu ly video | Doc frame, ghi debug video, cat clip bang chung |
-| Geometry | Kiem tra xe cat qua stop line |
-| State machine | Quan ly event `pending -> confirmed -> dismissed` |
-| OCR | Doc ky tu bien so bang HyperLPR3/PaddleOCR/EasyOCR |
-| Data engineering nho | Luu event JSON, metadata, folder output |
-| Software engineering | Module hoa code, config rieng, test unit |
+| Computer Vision | Vehicle detection, plate detection, traffic light ROI |
+| Multi-object Tracking | Gán `track_id` cho xe qua nhiều frame |
+| Xử lý video | Đọc frame, ghi debug video, cắt clip bằng chứng |
+| Geometry | Kiểm tra xe cắt qua stop line (Shapely) |
+| State machine | Quản lý event `pending → confirmed → dismissed` |
+| OCR | Đọc biển số bằng HyperLPR3/PaddleOCR/EasyOCR |
+| Data engineering | Lưu event JSON, metadata, folder output |
+| Software engineering | Module hoá code, config riêng, unit test |
 
-Neu hoan thien tot, day co the la main project CV cho vi tri:
-
-- AI Engineer Intern.
-- Computer Vision Intern.
-- Machine Learning Engineer Intern.
-- Data/AI Application Intern.
+Phù hợp CV cho: AI Engineer Intern, CV Intern, ML Engineer Intern.
 
 ---
 
-## 3. Kien truc tong the
-
-Pipeline hien tai co the hinh dung nhu sau:
+## 3. Kiến trúc tổng thể
 
 ```text
-Input Video
-  |
-  v
-Frame Reader
-  |
-  v
-Vehicle Detector (YOLO)
-  |
-  v
-Vehicle Tracker (ByteTrack)
-  |
-  v
-Traffic Light State Estimator
-  |
-  v
-Stop Line Crossing Logic
-  |
-  v
-Violation Event Trigger
-  |
-  v
-Plate Detector + OCR
-  |
-  v
-Evidence Builder
-  |
-  v
-Event Store (JSON)
+Input Video (cam_01_clip_001.mp4)
+  │
+  ▼
+Frame Reader ─── đọc từng frame từ video
+  │
+  ▼
+Vehicle Detector (YOLO) ─── phát hiện xe trong frame
+  │
+  ▼
+Vehicle Tracker (ByteTrack/IoU) ─── gán track_id, theo dõi xe
+  │
+  ▼
+Traffic Light Estimator (HSV) ─── xác định đèn đỏ/xanh/vàng
+  │
+  ▼
+Stop Line Crossing Logic ─── kiểm tra xe cắt qua vạch dừng
+  │
+  ▼
+Violation Engine ─── đèn đỏ + cắt vạch → tạo event PENDING
+  │
+  ▼
+Plate Detector + OCR ─── crop biển số, đọc ký tự
+  │
+  ▼
+OCR Fusion ─── vote kết quả OCR nhiều frame → biển số tốt nhất
+  │
+  ▼
+Evidence Builder ─── lưu frame.jpg, plate.jpg, clip.mp4
+  │
+  ▼
+Event Store ─── lưu event.json + events_index.json
 ```
 
-Mot pipeline nhu vay duoc goi la **multi-stage computer vision pipeline**. Thay vi yeu cau mot model duy nhat lam tat ca, ta chia bai toan thanh nhieu buoc nho. Moi buoc co input, output va trach nhiem ro rang.
-
-### 3.1. Tai sao chia thanh pipeline?
-
-Neu chi noi "phat hien xe vi pham", nghe co ve don gian. Nhung may tinh can tra loi rat nhieu cau hoi nho:
-
-1. Trong frame nay co xe nao?
-2. Xe o dau?
-3. Xe nay co phai cung la xe o frame truoc khong?
-4. Den giao thong dang mau gi?
-5. Xe co di qua vach dung khong?
-6. Luc xe di qua, den co do khong?
-7. Neu vi pham, bien so cua xe la gi?
-8. Can luu bang chung nao de nguoi xem co the kiem tra lai?
-
-Moi cau hoi tren la mot stage trong pipeline.
+Đây là **multi-stage pipeline**: chia bài toán thành nhiều bước nhỏ, mỗi bước có input/output rõ ràng. Chia nhỏ giúp debug dễ (biết stage nào sai), test riêng từng phần, và thay thế component mà không ảnh hưởng phần còn lại.
 
 ---
 
-## 4. Giai thich tung thanh phan trong pipeline
+## 4. Giải thích từng thành phần
 
-### 4.1. Frame Reader - doc video thanh frame
+### 4.1. Frame Reader — đọc video thành frame
 
-**Module lien quan:** `src/io/video_reader.py`
+**Module:** `src/io/video_reader.py`
 
-Video thuc chat la mot chuoi anh lien tiep. Moi anh goi la mot **frame**. Neu video co 30 FPS, nghia la moi giay co khoang 30 frame.
+Video là chuỗi ảnh liên tiếp. Mỗi ảnh = 1 frame. Video 30 FPS = 30 frame/giây.
 
-Frame Reader co nhiem vu:
+Frame Reader dùng `cv2.VideoCapture` để mở video, đọc metadata (width, height, FPS), và trả từng frame cho pipeline.
 
-- Mo file video bang OpenCV.
-- Doc thong tin video: width, height, FPS, so frame.
-- Doc tung frame de dua vao pipeline.
-
-Vi du:
-
-```text
-cam_01_clip_001.mp4
-  -> frame 1
-  -> frame 2
-  -> frame 3
-  -> ...
-```
-
-**Kien thuc can nam:**
-
-- FPS cang cao thi video cang muot, nhung xu ly cang nang.
-- Trong AI video, ta thuong khong can xu ly tat ca frame neu can toi uu toc do.
-- Debug video la video dau ra co ve bbox, track_id, stop line de con nguoi xem lai.
+**Lưu ý:** FPS cao → mượt nhưng nặng. Trong AI video có thể skip frame để tối ưu tốc độ.
 
 ---
 
-### 4.2. Vehicle Detector - phat hien xe bang YOLO
+### 4.2. Vehicle Detector — phát hiện xe bằng YOLO
 
-**Module lien quan:** `src/detection/vehicle_detector.py`
+**Module:** `src/detection/vehicle_detector.py`
 
-Stage nay tra loi cau hoi: **Trong frame hien tai co xe nao va xe nam o dau?**
+Trả lời: **Trong frame có xe nào, ở đâu?**
 
-Du an dung YOLO tu thu vien `ultralytics`. YOLO la mot model object detection pho bien, co the phat hien nhieu loai vat the trong anh.
+Output: danh sách bounding box `[x1, y1, x2, y2]` + confidence + class (`car`/`bus`/`truck`).
 
-Output cua detector thuong la danh sach bbox:
+**YOLO** (You Only Look Once): nhìn cả ảnh một lần, dự đoán trực tiếp tất cả bbox + class. Nhanh, phù hợp video.
 
-```text
-[
-  {
-    bbox: [x1, y1, x2, y2],
-    confidence: 0.87,
-    class_name: "car"
-  },
-  ...
-]
-```
+Dự án dùng `yolov8n.pt` (nano) — nhỏ, nhanh, pretrained trên COCO (80 class). Lọc chỉ lấy class `car` (class ID = 2).
 
-Trong do:
-
-- `x1, y1`: toa do goc tren trai cua bbox.
-- `x2, y2`: toa do goc duoi phai cua bbox.
-- `confidence`: do tu tin cua model.
-- `class_name`: ten lop, vi du `car`, `bus`, `truck`.
-
-**Ly thuyet ngan gon ve YOLO:**
-
-YOLO la viet tat cua "You Only Look Once". Thay vi cat anh thanh nhieu vung roi phan loai tung vung, YOLO nhin ca anh mot lan va du doan truc tiep cac bounding box cung class. Uu diem cua YOLO la nhanh, phu hop cho video.
-
-**Tai sao dung YOLO cho project nay?**
-
-- De cai dat va dung voi `ultralytics`.
-- Co model pretrained tren COCO.
-- Chay nhanh tren CPU/GPU.
-- De fine-tune sau nay neu co du lieu rieng.
-
-**Luu y quan trong:**
-
-Model YOLO COCO co class `car`, `bus`, `truck`, nhung khong co class `license plate`. Vi vay YOLO mac dinh dung tot cho phat hien xe, nhung khong du cho phat hien bien so.
+**Lưu ý:** COCO **không có** class `license_plate` → cần model riêng cho plate detection.
 
 ---
 
-### 4.3. Vehicle Tracker - theo doi xe qua nhieu frame
+### 4.3. Vehicle Tracker — theo dõi xe qua frame
 
-**Module lien quan:** `src/tracking/vehicle_tracker.py`
+**Module:** `src/tracking/vehicle_tracker.py`
 
-Neu chi detect tung frame rieng le, ta biet frame nay co xe, frame sau cung co xe, nhung chua biet do co phai cung mot xe hay khong.
-
-Tracking tra loi cau hoi: **Xe nay o frame hien tai co phai la xe da xuat hien o frame truoc khong?**
-
-Du an dung ByteTrack de gan `track_id` cho tung xe:
+Trả lời: **Xe này ở frame hiện tại có phải xe đã thấy ở frame trước?**
 
 ```text
-Frame 10: car bbox -> ID 3
-Frame 11: car bbox -> ID 3
-Frame 12: car bbox -> ID 3
+Frame 10: car bbox → track_id = 3
+Frame 11: car bbox → track_id = 3  (cùng xe)
+Frame 13: new car  → track_id = 4  (xe mới)
 ```
 
-Neu tracking tot, cung mot xe se giu cung mot ID trong suot qua trinh di qua camera.
+**Vì sao cần tracking?** Vi phạm là sự kiện theo thời gian — cần biết đường đi của xe (trước vạch → sau vạch). Không có tracking = không biết xe di chuyển thế nào. Tracking cũng giúp gom OCR nhiều frame cho cùng xe.
 
-**Vi sao tracking quan trong voi bai toan vi pham?**
-
-Ta can biet duong di cua mot xe:
-
-```text
-Vi tri truoc vach dung -> Vi tri sau vach dung
-```
-
-Neu khong co tracking, ta kho xac dinh mot xe da di chuyen nhu the nao qua thoi gian. Vi pham giao thong khong chi la mot khoanh khac, ma la mot **su kien theo thoi gian**.
-
-**Ly thuyet ngan gon ve ByteTrack:**
-
-ByteTrack la mot tracker multi-object. No nhan detection bbox moi frame, sau do lien ket bbox qua nhieu frame dua tren:
-
-- Vi tri bbox.
-- Do tu tin detection.
-- Do tuong dong chuyen dong.
-
-Uu diem cua ByteTrack la no co the tan dung ca detection confidence cao va thap de giam mat track khi vat the bi che mot phan.
+**ByteTrack:** tracker multi-object, liên kết bbox qua frame dựa trên vị trí + confidence + chuyển động. Hiện đang dùng IoU tracker fallback (đơn giản hơn, dễ đổi ID hơn).
 
 ---
 
-### 4.4. Traffic Light State Estimator - xac dinh mau den giao thong
+### 4.4. Traffic Light Estimator — xác định màu đèn
 
-**Module lien quan:** `src/traffic_light/light_state.py`
+**Module:** `src/traffic_light/light_state.py`
 
-Stage nay tra loi cau hoi: **Den giao thong trong frame dang do, vang, xanh hay khong ro?**
+Trả lời: **Đèn đang đỏ, vàng, xanh hay không rõ?**
 
-Trong MVP, cach lam khong dung deep learning ma dung ROI va HSV threshold.
+Cách làm: ROI + HSV threshold (không dùng deep learning).
 
-#### ROI la gi?
+**ROI** (Region of Interest): vùng ảnh đèn giao thông, đánh dấu sẵn trong config vì camera cố định.
 
-ROI la viet tat cua **Region of Interest**, nghia la vung anh ma ta quan tam. Vi camera co dinh, vi tri den giao thong gan nhu khong thay doi. Ta co the danh dau san vung den trong config:
+**HSV** (Hue-Saturation-Value): không gian màu dễ lọc hơn BGR. Đếm pixel đỏ/xanh/vàng trong ROI → màu nào nhiều nhất = trạng thái đèn.
 
-```json
-"traffic_light_roi": [
-  [1000, 200],
-  [1150, 200],
-  [1150, 380],
-  [1000, 380]
-]
-```
-
-He thong chi can nhin vao vung nay de xac dinh mau den.
-
-#### HSV la gi?
-
-HSV la khong gian mau gom:
-
-- `H` - Hue: sac mau, vi du do, xanh, vang.
-- `S` - Saturation: do bao hoa mau.
-- `V` - Value: do sang.
-
-OpenCV thuong doc anh theo BGR, sau do convert sang HSV de loc mau de hon.
-
-Vi du logic don gian:
-
-```text
-Neu so pixel mau do trong ROI lon nhat -> den do
-Neu so pixel mau xanh trong ROI lon nhat -> den xanh
-Neu so pixel mau vang trong ROI lon nhat -> den vang
-Neu khong ro -> unknown hoac giu trang thai cu
-```
-
-**Uu diem cua cach nay:**
-
-- Don gian, de giai thich.
-- Khong can dataset den giao thong.
-- Phu hop voi camera co dinh va video ban ngay.
-
-**Nhuoc diem:**
-
-- De sai neu ROI sai.
-- De bi anh huong boi nang, bong, den LED nho.
-- Can tinh chinh threshold theo video thuc te.
+Ưu điểm: đơn giản, nhanh, không cần dataset. Nhược điểm: phụ thuộc ROI đúng, dễ sai khi nắng/bóng.
 
 ---
 
-### 4.5. Stop Line Crossing Logic - kiem tra xe co cat qua vach dung
+### 4.5. Stop Line Crossing — kiểm tra xe cắt vạch
 
-**Module lien quan:** `src/geometry/line_crossing.py`
+**Module:** `src/geometry/line_crossing.py`
 
-Stage nay tra loi cau hoi: **Xe co di qua stop line khong?**
+Trả lời: **Xe có đi qua stop line không?**
 
-Trong config, stop line duoc dinh nghia bang 2 diem:
-
-```json
-"stop_line": [
-  [850, 680],
-  [1150, 680]
-]
-```
-
-Moi xe co bbox. Ta lay diem **bottom-center** cua bbox lam diem dai dien cho vi tri xe tren mat duong:
+Lấy **bottom-center** của bbox xe (gần mặt đường nhất) làm đại diện vị trí. So sánh vị trí qua 2 frame:
 
 ```text
-x_center = (x1 + x2) / 2
-y_bottom = y2
+Frame trước:  bottom-center ở trên vạch (y=534)
+Frame hiện tại: bottom-center ở dưới vạch (y=529)
+Stop line y ≈ 530 → đường đi cắt qua vạch → crossing!
 ```
 
-Ly do lay bottom-center: day la diem gan voi banh xe/mat duong hon so voi tam bbox.
+Shapely kiểm tra 2 đoạn thẳng (stop line + movement line) có cắt nhau không.
 
-Sau do so sanh:
-
-```text
-Frame truoc: xe o tren vach
-Frame hien tai: xe o duoi vach
-=> duong di cua xe cat qua stop line
-=> crossing detected
-```
-
-**Kien thuc geometry:**
-
-Ta co hai doan thang:
-
-1. Stop line: doan thang co dinh tren mat duong.
-2. Movement line: doan thang noi vi tri xe o frame truoc va frame hien tai.
-
-Neu hai doan thang cat nhau, xe da di qua vach.
-
-**Vi sao can direction?**
-
-Trong anh, truc y tang tu tren xuong duoi. Neu xe di tu tren xuong duoi:
-
-```text
-y hien tai > y truoc do
-=> chuyen dong forward
-```
-
-Neu xe di nguoc lai:
-
-```text
-y hien tai < y truoc do
-=> chuyen dong backward
-```
-
-Voi camera co dinh, ta can khai bao huong di dung de tranh nham xe di nguoc chieu hoac xe o phia ben kia duong.
+**Direction:** Trong ảnh, y tăng từ trên xuống. Video hiện tại xe đi lên → `y giảm` → `direction = backward`.
 
 ---
 
-### 4.6. Violation Engine - tao va quan ly su kien vi pham
+### 4.6. Violation Engine — quản lý sự kiện vi phạm
 
-**Module lien quan:** `src/violation/violation_engine.py`, `src/violation/event_state.py`
+**Module:** `src/violation/violation_engine.py`, `src/violation/event_state.py`
 
-Stage nay tra loi cau hoi: **Khi nao thi mot xe duoc xem la vi pham?**
+Điều kiện vi phạm: **xe cắt stop line + đèn đỏ + track đủ frame**.
 
-Dieu kien MVP:
-
-```text
-Xe cat qua stop line
-AND
-Den giao thong dang do
-AND
-Track da ton tai du so frame toi thieu
-```
-
-Khi dieu kien dung, he thong tao mot event:
+**State machine:**
 
 ```text
-EventState.PENDING
+PENDING ──(OCR thành công)──→ CONFIRMED
+PENDING ──(mất track/timeout)──→ DISMISSED
 ```
 
-Sau do neu doc duoc bien so va luu duoc bang chung:
-
-```text
-EventState.CONFIRMED
-```
-
-Neu xe mat track hoac khong du dieu kien xac nhan:
-
-```text
-EventState.DISMISSED
-```
-
-Day la mot **state machine**.
-
-### 4.6.1. State machine la gi?
-
-State machine la cach mo hinh hoa mot doi tuong co nhieu trang thai va cac dieu kien de chuyen trang thai.
-
-Trong du an:
-
-```text
-pending -> confirmed
-pending -> dismissed
-```
-
-Bang giai thich:
-
-| State | Y nghia |
+| Trạng thái | Ý nghĩa |
 |---|---|
-| `pending` | Xe co dau hieu vi pham, dang cho OCR/evidence |
-| `confirmed` | Da doc bien so hoac da co bang chung du de luu |
-| `dismissed` | Khong xac nhan duoc, loai bo |
+| `pending` | Nghi vi phạm, chờ OCR/evidence |
+| `confirmed` | Đã có biển số / bằng chứng đủ |
+| `dismissed` | Không xác nhận được, loại bỏ |
 
-**Vi sao can state machine?**
-
-Vi mot event vi pham khong ket thuc ngay tai frame cat vach. Sau khi phat hien vi pham, he thong con can doc bien so trong vai frame tiep theo, chon frame tot, luu anh/clip. State machine giup quan ly qua trinh nay ro rang hon.
+State machine giúp quản lý rõ ràng: event nào đang chờ, xong, hay bị huỷ.
 
 ---
 
-### 4.7. Plate Detector - phat hien bien so
+### 4.7. Plate Detector — phát hiện biển số
 
-**Module lien quan:** `src/plate/plate_detector.py`
-
-Stage nay tra loi cau hoi: **Bien so nam o dau trong anh xe?**
-
-Bien so la object nho, nen khong nen OCR ca anh full-frame. Ta can cat dung vung bien so truoc.
-
-Pipeline ly tuong:
+**Module:** `src/plate/plate_detector.py`
 
 ```text
-Full frame
-  -> crop vehicle bbox
-  -> detect license plate inside vehicle crop
-  -> crop plate
-  -> OCR
+Full frame → crop vehicle bbox → detect plate → crop plate → OCR
 ```
 
-**Cong nghe hien tai:** crop heuristic theo bbox xe, co the thay bang YOLO custom cho license plate.
+Cách hoạt động hiện tại:
+1. Nếu có weight `models/plate_detector/ccpd_yolov8n_best.pt` → YOLO custom.
+2. Nếu không → heuristic crop vùng dưới vehicle bbox.
 
-**Diem can chu y:**
-
-YOLO pretrained `yolov8n.pt` tren COCO khong co class license plate. Neu dung no lam plate detector, ket qua se khong dang tin. Can mot trong hai cach:
-
-1. Dung pretrained license plate detector tu nguon khac.
-2. Fine-tune YOLO tren dataset bien so.
-3. Ban MVP nhanh co the crop vung duoi cua vehicle bbox roi OCR truc tiep, nhung do chinh xac se kem hon.
-
-Trong repo hien tai, dataset fine-tune da san sang tai:
-
-```text
-data/processed/ccpd_layer4/ccpd_plate.yaml
-data/processed/ccpd_layer4/images/{train,val,test}/
-data/processed/ccpd_layer4/labels/{train,val,test}/
-```
-
-Day la subset rut gon tu CCPD2019, gom 8,000 anh co bien so va 598 anh khong co bien so. No du cho baseline plate detector, con raw CCPD full khong can giu tiep.
-
-Trong Layer 4 baseline, repo chua bat buoc phai co weight YOLO plate detector. Thay vao do, `PlateDetector` lam nhu sau:
-
-1. Neu `plate_detector_model` ton tai, dung YOLO custom.
-2. Neu model khong ton tai, dung heuristic tim vung plate mau xanh/la va fallback crop vung duoi cua vehicle bbox.
-3. Luu `plate.jpg` de OCR va de reviewer xem lai.
+Fine-tune trên CCPD subset (8,000 ảnh): mAP50 = 0.994.
 
 ---
 
-### 4.8. Plate OCR - doc ky tu bien so
+### 4.8. Plate OCR — đọc ký tự biển số
 
-**Module lien quan:** `src/plate/plate_ocr.py`
-
-OCR la viet tat cua **Optical Character Recognition**, nghia la nhan dien chu trong anh.
-
-Du an co nhieu OCR backend:
+**Module:** `src/plate/plate_ocr.py`
 
 ```text
-plate image -> OCR backend -> text + confidence
+Ảnh biển số → OCR backend → "浙B56061" + confidence
 ```
 
-Vi du:
+Backend: `hyperlpr` (tốt nhất cho biển TQ hiện tại), `paddle`, `easyocr`, `none`.
 
-```text
-Input: anh bien so
-Output: "51H-12345", confidence = 0.92
-```
-
-Backend hien tai:
-
-- `hyperlpr`: phu hop video hien tai vi bien so la bien Trung Quoc.
-- `paddle`: huong chung cho OCR da ngon ngu neu cai duoc PaddleOCR.
-- `easyocr`: fallback de thu nghiem nhanh.
-- `none`: tat OCR nhung van luu plate crop.
-
-Trong run moi nhat, HyperLPR3 confirmed duoc 3/4 event candidate. Confidence con thap nen ket qua OCR can manual review truoc khi tinh Plate Accuracy.
-
-**Kho khan khi OCR bien so:**
-
-- Bien so nho.
-- Anh bi mo do chuyen dong.
-- Goc camera nghieng.
-- Anh sang manh/yiu.
-- Ky tu de nham: `0/O`, `1/I`, `5/S`, `8/B`.
+Khó khăn: biển nhỏ, motion blur, góc nghiêng, ánh sáng, ký tự nhầm (0/O, 1/I, 5/S).
 
 ---
 
-### 4.9. OCR Fusion - hop nhat ket qua OCR qua nhieu frame
+### 4.9. OCR Fusion — hợp nhất OCR nhiều frame
 
-**Module lien quan:** `src/plate/fusion.py`
+**Module:** `src/plate/fusion.py`
 
-Neu doc bien so o mot frame duy nhat, ket qua co the sai. Nhung trong video, cung mot xe xuat hien qua nhieu frame. Ta co the doc bien so nhieu lan roi vote.
-
-Vi du:
+Đọc biển số nhiều frame rồi **vote**:
 
 ```text
-Frame 101: 51H-12345, conf 0.82
-Frame 102: 51H-12345, conf 0.88
-Frame 103: 51H-1234S, conf 0.61
-Frame 104: 51H-12345, conf 0.91
-
-Final: 51H-12345
+Frame 162: "京B56061"    Frame 163: "浙B56061"
+Frame 164: "京554641"    Frame 165: "京556861"
+→ Vote: "浙B56061" (confidence cao nhất) → Final text
 ```
 
-Day goi la **temporal fusion**. "Temporal" nghia la theo thoi gian. Fusion nghia la hop nhat nhieu ket qua thanh mot ket qua tot hon.
-
-**Tai sao temporal fusion quan trong?**
-
-OCR co the sai o tung frame rieng le, nhung neu nhin nhieu frame, ket qua dung thuong xuat hien lap lai nhieu lan hon.
+**Temporal fusion** biến OCR ~70% single frame thành ~90%+ trên chuỗi frame.
 
 ---
 
-### 4.10. Evidence Builder - luu bang chung
+### 4.10. Evidence Builder — lưu bằng chứng
 
-**Module lien quan:** `src/evidence/evidence_builder.py`
-
-Khi co event vi pham, he thong can luu bang chung de nguoi khac kiem tra lai:
+**Module:** `src/evidence/evidence_builder.py`
 
 ```text
-outputs/events/EVT_0001/
-  frame.jpg
-  plate.jpg
-  clip.mp4
-  event.json
+outputs/events_layer4/EVT_0001/
+├── frame.jpg   — ảnh full frame
+├── plate.jpg   — crop biển số
+├── clip.mp4    — clip ngắn quanh thời điểm vi phạm
+└── event.json  — metadata (event_id, track_id, plate_text, light_state...)
 ```
 
-Trong do:
+Cần evidence để: debug khi sai, giải thích cho người, làm demo CV, tính metric.
 
-| File | Y nghia |
+---
+
+### 4.11. Event Store
+
+**Module:** `src/storage/event_store.py`
+
+Lưu event ra JSON + cập nhật `events_index.json`. MVP dùng JSON, sau có thể mở rộng sang SQLite/PostgreSQL/API.
+
+---
+
+## 5. Công nghệ sử dụng
+
+| Công nghệ | Vai trò |
 |---|---|
-| `frame.jpg` | Anh full frame co xe vi pham |
-| `plate.jpg` | Anh crop bien so |
-| `clip.mp4` | Clip ngan quanh thoi diem vi pham |
-| `event.json` | Metadata: event_id, track_id, frame_idx, plate_text, confidence |
-
-**Vi sao can evidence?**
-
-Trong project AI thuc te, output khong chi la "co vi pham" hay "khong vi pham". Ta can co bang chung de:
-
-- Debug khi model sai.
-- Giai thich ket qua cho con nguoi.
-- Lam demo cho nha tuyen dung.
-- Tinh metric sau nay.
+| **Python** | Ngôn ngữ chính — hệ sinh thái AI/CV mạnh |
+| **OpenCV** | Đọc/ghi video, vẽ debug, crop, convert HSV |
+| **Ultralytics YOLO** | Detect xe + fine-tune detect biển số |
+| **ByteTrack / IoU** | Tracking xe qua frame |
+| **HyperLPR3** | OCR biển số Trung Quốc (backend chính hiện tại) |
+| **PaddleOCR / EasyOCR** | OCR fallback/mở rộng |
+| **Shapely** | Geometry — kiểm tra line crossing |
+| **JSON / YAML** | Config + metadata storage |
 
 ---
 
-### 4.11. Event Store - luu va truy van event
-
-**Module lien quan:** `src/storage/event_store.py`
-
-Event Store quan ly viec luu event ra JSON va cap nhat index:
-
-```text
-events_index.json
-EVT_0001/event.json
-EVT_0002/event.json
-...
-```
-
-Voi MVP, JSON la du. Sau nay neu mo rong, co the thay bang:
-
-- SQLite.
-- PostgreSQL.
-- API backend.
-- Dashboard web.
-
----
-
-## 5. Cong nghe su dung trong du an
-
-### 5.1. Python
-
-Python la ngon ngu chinh vi he sinh thai AI/CV rat manh:
-
-- OpenCV cho video/image.
-- Ultralytics YOLO cho object detection.
-- HyperLPR3/PaddleOCR/EasyOCR cho OCR.
-- NumPy cho xu ly ma tran/anh.
-- PyYAML/JSON cho config.
-
-### 5.2. OpenCV
-
-OpenCV duoc dung cho:
-
-- Doc video.
-- Ghi video.
-- Ve bbox, stop line, text debug.
-- Crop anh.
-- Convert mau BGR sang HSV.
-
-Day la thu vien nen tang trong computer vision.
-
-### 5.3. Ultralytics YOLO
-
-YOLO duoc dung cho:
-
-- Detect xe.
-- Co the dung/fine-tune detect bien so neu co weights phu hop.
-
-Trong du an, YOLO vehicle detector dung model `yolov8n.pt`. Ban `n` la nano, nho va nhanh, phu hop MVP.
-
-### 5.4. ByteTrack
-
-ByteTrack duoc dung de tracking xe qua frame. Dau vao la detection bbox, dau ra la tracked object co `track_id`.
-
-Mot project video AI co tracking se thuyet phuc hon project chi detect anh, vi no xu ly duoc thong tin theo thoi gian.
-
-### 5.5. OCR backends
-
-Du an boc OCR thanh backend co the thay the. HyperLPR3 dang phu hop nhat voi video hien tai vi bien so la bien Trung Quoc. PaddleOCR/EasyOCR van giu vai tro fallback hoac huong mo rong khi doi domain. Moi backend tra ve `text + confidence`, sau do ket qua duoc dua vao fusion de tang do on dinh.
-
-### 5.6. Shapely
-
-Shapely duoc dung cho geometry, dac biet la kiem tra hai doan thang co cat nhau khong. Trong du an, no ho tro line crossing logic.
-
-### 5.7. JSON/YAML
-
-Du an dung:
-
-- JSON cho camera scene config va event metadata.
-- YAML cho default pipeline config.
-
-Tach config ra khoi code la thoi quen tot trong software engineering. Khi thay video/camera, ta chi can sua config, khong sua logic.
-
----
-
-## 6. Giai thich cau truc thu muc
+## 6. Cấu trúc thư mục
 
 ```text
 traffic-violation-lpr/
-├── configs/
-│   ├── default.yaml
-│   └── cameras/cam_01.json
-├── data/
-│   └── README.md
-├── models/
+├── configs/                    — cấu hình pipeline + camera
+├── data/                       — video, annotations, processed dataset
+├── models/                     — model weights (gitignored)
+├── scripts/                    — train, evaluate, demo scripts
 ├── src/
-│   ├── io/
-│   ├── detection/
-│   ├── tracking/
-│   ├── traffic_light/
-│   ├── geometry/
-│   ├── violation/
-│   ├── plate/
-│   ├── evidence/
-│   └── storage/
-├── tests/
-├── README.md
-├── Plan.md
-├── MILESTONES.md
-├── IMPLEMENTATION_PLAN.md
+│   ├── main.py                 — pipeline orchestrator
+│   ├── io/                     — đọc/ghi video
+│   ├── detection/              — phát hiện xe (YOLO)
+│   ├── tracking/               — theo dõi xe
+│   ├── traffic_light/          — trạng thái đèn
+│   ├── geometry/               — stop line crossing
+│   ├── violation/              — event state machine
+│   ├── plate/                  — plate detect, OCR, fusion
+│   ├── evidence/               — lưu bằng chứng
+│   └── storage/                — lưu event JSON
+├── tests/                      — unit tests
+├── outputs/                    — events, reports, debug video (gitignored)
+├── README.md / Plan.md / MILESTONES.md / ...
 └── requirements.txt
 ```
 
-Bang giai thich:
-
-| Thu muc/file | Vai tro |
-|---|---|
-| `configs/` | Chua cau hinh pipeline va camera |
-| `data/` | Noi dat video, frame, annotations |
-| `models/` | Noi dat model weights, thuong bi gitignore |
-| `src/io/` | Doc/ghi video |
-| `src/detection/` | Phat hien xe |
-| `src/tracking/` | Theo doi xe qua frame |
-| `src/traffic_light/` | Xac dinh trang thai den |
-| `src/geometry/` | Logic hinh hoc, stop line crossing |
-| `src/violation/` | Event/state machine vi pham |
-| `src/plate/` | Detect bien so, OCR, fusion |
-| `src/evidence/` | Luu bang chung |
-| `src/storage/` | Luu event JSON/index |
-| `tests/` | Unit tests |
-
-Cau truc nay kha tot cho portfolio vi moi module co trach nhiem rieng. Nha tuyen dung co the doc repo va hieu nhanh logic tong the.
-
 ---
 
-## 7. Giai thich cac file config
+## 7. File config quan trọng
 
-### 7.1. `configs/default.yaml`
-
-File nay chua tham so chung:
+### `configs/default.yaml` — tham số pipeline
 
 ```yaml
 model:
-  vehicle_model: yolov8n.pt
-  vehicle_conf: 0.3
-  vehicle_iou: 0.4
-  vehicle_classes: [2]
-
+  vehicle_model: yolov8n.pt     # model detect xe
+  vehicle_conf: 0.3             # confidence tối thiểu
+  vehicle_classes: [2]          # class 2 = car (COCO)
 tracking:
   track_thresh: 0.5
-  track_buffer: 30
-
+  track_buffer: 30              # giữ track bao nhiêu frame khi mất detect
 ocr:
-  lang: vi_en
-  vote_frames: 5
+  vote_frames: 5                # số frame OCR trước khi fusion
 ```
 
-Giai thich mot so tham so:
-
-| Tham so | Y nghia |
-|---|---|
-| `vehicle_conf` | Detection confidence toi thieu de chap nhan bbox |
-| `vehicle_iou` | Nguong IoU cho NMS cua YOLO |
-| `vehicle_classes` | Class ID muon detect, COCO class 2 la car |
-| `track_thresh` | Nguong confidence cho tracking |
-| `track_buffer` | So frame giu track khi doi tuong tam thoi mat detection |
-| `vote_frames` | So frame OCR can doc truoc khi fusion |
-
-### 7.2. `configs/cameras/cam_01.json`
-
-File nay chua thong tin rieng cua camera:
+### `configs/cameras/cam_01.json` — scene config camera
 
 ```json
 {
   "camera_id": "CAM_01",
   "stop_line": [[850, 680], [1150, 680]],
   "traffic_light_roi": [[1000, 200], [1150, 200], [1150, 380], [1000, 380]],
-  "direction": "forward"
+  "direction": "backward"
 }
 ```
 
-Day la file rat quan trong. Neu toa do stop line hoac traffic light ROI sai, ca pipeline se sai.
-
-**Nguyen tac thuc hanh:**
-
-- Moi video/camera nen co mot config rieng.
-- Phai dung frame dau tien hoac notebook de click toa do that.
-- Khong nen dung toa do mau neu video khac kich thuoc/resolution.
+**Nếu stop line hoặc traffic light ROI sai → cả pipeline sẽ sai** dù model tốt đến đâu. Phải dùng reference frame để click toạ độ thật.
 
 ---
 
-## 8. Giai thich ke hoach trien khai trong Plan/Milestones
+## 8. Các Layer triển khai
 
-### Phase 1 / Layer 1 - Data Preparation & I/O
+| Layer | Mục tiêu | Kỹ năng chính |
+|---|---|---|
+| **1** | Chuẩn bị video, config, reference frames | Data engineering |
+| **2** | Detect xe + tracking + debug video | YOLO, tracking, OpenCV |
+| **3** | Phát hiện vi phạm (đèn đỏ + cắt vạch) | Geometry, state machine, HSV |
+| **4** | OCR biển số + lưu bằng chứng | Plate detection, OCR, fusion |
+| **5** | Evaluation, metric, demo, polish | Evaluation, documentation |
 
-**Muc tieu:** tao khung du an, chuan bi video ngan, lay frame tham chieu va dam bao input co the dung de debug.
-
-Can hoan thanh:
-
-- Cau truc folder ro rang.
-- VideoReader doc duoc frame.
-- VideoWriter ghi duoc debug video.
-- Config camera mau.
-- Clip video ngan 30-60 giay.
-- Reference frames de annotate stop line/ROI.
-- Inventory JSON de ghi metadata video.
-
-**Vi sao phase nay quan trong?**
-
-Neu khong doc/ghi video on dinh, cac model AI phia sau khong co du lieu dau vao/dau ra de kiem tra. Day la nen mong cua toan bo pipeline.
-
-**Tieu chi pass:**
-
-```bash
-python src/main.py \
-  --video data/raw_videos/clips/cam_01_clip_001.mp4 \
-  --camera configs/cameras/cam_01.json
-```
-
-Lenh chay khong crash va co output debug co ban. Hien tai Layer 1 da chuan bi xong du lieu; buoc tiep theo la fix logic/runtime de lenh pipeline chay on dinh.
+Layer 5 quan trọng nhất cho CV: nhà tuyển dụng xem bạn có demo, metric, README rõ không — không chỉ xem dùng YOLO.
 
 ---
 
-### Phase 2 - Vehicle Detection + Tracking
+## 9. Luồng xử lý chi tiết (ví dụ frame 162)
 
-**Muc tieu:** phat hien xe va gan track_id on dinh.
-
-Can hoan thanh:
-
-- YOLO detect xe.
-- Loc class car.
-- ByteTrack gan ID.
-- Debug video ve bbox va ID.
-- Quan sat xe co bi doi ID lien tuc khong.
-
-**Tai sao tracking phai on dinh?**
-
-Neu mot xe dang di qua vach ma tracker doi ID lien tuc, he thong co the:
-
-- Khong nhan ra xe da cat qua line.
-- Tao nhieu event trung lap.
-- Khong gom duoc OCR readings cua cung mot xe.
-
-**Metric nen co:**
-
-- So lan ID switch.
-- Ty le xe giu ID on dinh den khi roi frame.
-- FPS xu ly.
+1. **Đọc frame** — frame_idx=162, 1342×1008 pixel.
+2. **Detect xe** — bbox=(1107,378,1254,474), conf=0.88, class=car.
+3. **Tracking** — track_id=5 (cùng xe từ frame trước).
+4. **Đèn giao thông** — light_state=RED, conf=0.60.
+5. **Stop line** — bottom-center di chuyển từ y=534 → y=529, cắt qua vạch y≈530 → **crossing detected**.
+6. **Tạo event** — EVT_0002, state=PENDING.
+7. **Plate OCR** — crop xe → detect plate → HyperLPR3 → "浙B56061".
+8. **Fusion** — 5 frame vote → final "浙B56061".
+9. **Confirm** — state=CONFIRMED, lưu frame.jpg + plate.jpg + clip.mp4 + event.json.
 
 ---
 
-### Phase 3 - Traffic Light + Stop Line
+## 10. Metric đánh giá
 
-**Muc tieu:** biet khi nao den do va xe cat qua vach.
+| Metric | Công thức | Target | Hiện tại |
+|---|---|---:|---|
+| **Event Precision** | TP/(TP+FP) | >80% | 5/5=100% (theo rule) |
+| **Event Recall** | TP/(TP+FN) | >70% | Chưa (cần full GT) |
+| **Plate Accuracy** | đúng/tổng readable | >85% | Chưa (crop quá nhỏ) |
+| **Processing FPS** | frames/time | ≥15 | ~19.5 |
 
-Can hoan thanh:
-
-- Traffic light ROI.
-- HSV threshold cho do/vang/xanh.
-- Stop line coordinates.
-- Logic bottom-center crossing.
-- Event state `pending`.
-
-**Day la phan bien detection thanh "hieu hanh vi".**
-
-YOLO chi noi co xe. Tracking noi xe di dau. Stop line + den giao thong moi tra loi duoc cau hoi: xe co vi pham hay khong.
-
-**Metric nen co:**
-
-- Ty le frame nhan dung light state.
-- So event pending dung/sai khi xe qua vach.
-- So false positive khi den xanh.
+Không điền số ảo. Event Precision hiện tại chỉ là candidate precision theo rule kỹ thuật.
 
 ---
 
-### Phase 4 - Plate OCR + Evidence
+## 11. Rủi ro kỹ thuật
 
-**Muc tieu:** doc bien so xe vi pham va luu bang chung.
-
-Can hoan thanh:
-
-- [x] Plate detector khong dung sai YOLO COCO.
-- [x] Crop plate tu vehicle/plate bbox bang heuristic fallback.
-- [x] HyperLPR3 doc text cho video bien so Trung Quoc.
-- [x] OCR fusion qua nhieu frame.
-- [x] Save `frame.jpg`, `plate.jpg`, `clip.mp4`, `event.json`.
-- [ ] Fine-tune YOLO plate detector tren `data/processed/ccpd_layer4/ccpd_plate.yaml` de tang do ben.
-
-**Tai sao day la phase kho?**
-
-Bien so trong video giao thong thuong nho va mo. Detection xe co the de, nhung OCR bien so chinh xac moi la phan lam project khac biet.
-
-**Metric nen co:**
-
-- Plate detection recall tren event frames.
-- OCR accuracy.
-- Ty le event co plate text hop le.
+1. **Plate detector cần model riêng** — COCO YOLO không có license plate. Đã fix bằng fine-tune + heuristic fallback.
+2. **OCR phụ thuộc chất lượng crop** — crop sai/nhỏ → OCR không cứu được.
+3. **HSV dễ sai** nếu ROI sai hoặc ánh sáng bất thường.
+4. **Tracking ID switch** → event không confirm hoặc trùng lặp.
+5. **Config camera là yếu tố sống còn** — stop line/ROI sai = pipeline sai.
 
 ---
 
-### Phase 5 - Evaluation + Polish
+## 12. Checklist CV-ready
 
-**Muc tieu:** bien project tu "code chay duoc" thanh "portfolio chuyen nghiep".
+### Bắt buộc
 
-Can hoan thanh:
+- [x] Video sample 30-60s + config camera.
+- [x] Chạy end-to-end không crash.
+- [x] Debug video có bbox, track_id, stop line.
+- [x] Ít nhất 1 event output + `event.json` rõ ràng.
+- [x] OCR có kết quả thực.
+- [x] Demo asset đã blur biển số.
+- [ ] Metric đầy đủ (Plate Accuracy, Event Recall).
+- [x] `python -m pytest` pass.
 
-- Demo video/GIF trong README.
-- Metrics co so lieu that.
-- Huong dan setup ro rang.
-- Tests pass.
-- Code sach, config ro, output mau.
+### Nên có
 
-**Day la phase quan trong nhat neu dua vao CV.**
-
-Nha tuyen dung khong chi xem ban dung YOLO. Ho xem:
-
-- Ban co demo that khong?
-- Ban co biet do luong ket qua khong?
-- Ban co biet viet README de nguoi khac chay lai khong?
-- Ban co biet giai thich trade-off khong?
-
----
-
-## 9. Luong xu ly chi tiet khi chay pipeline
-
-Gia su ta co mot frame video. Pipeline xu ly nhu sau:
-
-### Buoc 1: Doc frame
-
-```text
-frame_idx = 120
-frame = anh tai frame 120
-```
-
-### Buoc 2: Detect xe
-
-```text
-detections = [
-  bbox=(500, 400, 700, 800), confidence=0.91, class="car"
-]
-```
-
-### Buoc 3: Tracking
-
-```text
-tracked = [
-  track_id=7, bbox=(505, 405, 705, 805)
-]
-```
-
-### Buoc 4: Xac dinh den
-
-```text
-light_state = red
-```
-
-### Buoc 5: Kiem tra stop line
-
-```text
-previous bottom-center = (600, 670)
-current bottom-center  = (605, 710)
-stop_line y = 680
-
-=> xe cat qua vach
-```
-
-### Buoc 6: Tao pending event
-
-```text
-EVT_0001
-track_id = 7
-state = pending
-```
-
-### Buoc 7: Detect/OCR bien so
-
-```text
-plate_crop -> OCR backend -> "浙B56061"
-```
-
-### Buoc 8: Fusion
-
-```text
-5 readings -> vote -> final_text = "51H-12345"
-```
-
-### Buoc 9: Confirm va luu bang chung
-
-```text
-state = confirmed
-save frame.jpg
-save plate.jpg
-save clip.mp4
-save event.json
-```
+- [ ] So sánh trước/sau OCR fusion.
+- [ ] Bảng lỗi thường gặp kèm giải thích.
+- [ ] Ảnh minh hoạ pipeline trong README.
+- [ ] Hướng dẫn annotate stop line/ROI.
 
 ---
 
-## 10. Metric danh gia du an
+## 13. Cách kể trong CV
 
-Mot du an AI khong nen chi noi "model chay duoc". Can co metric.
-
-### 10.1. Event Precision
-
-Cong thuc:
-
-```text
-Precision = TP / (TP + FP)
-```
-
-Trong do:
-
-- TP: he thong bao vi pham va thuc te co vi pham.
-- FP: he thong bao vi pham nhung thuc te khong vi pham.
-
-Precision cao nghia la it bao nham.
-
-### 10.2. Event Recall
-
-Cong thuc:
-
-```text
-Recall = TP / (TP + FN)
-```
-
-Trong do:
-
-- FN: thuc te co vi pham nhung he thong bo sot.
-
-Recall cao nghia la it bo sot.
-
-### 10.3. Plate Accuracy
-
-Cong thuc:
-
-```text
-Plate Accuracy = so bien so doc dung / so event that co bien so nhin duoc
-```
-
-### 10.4. Processing FPS
-
-Cong thuc:
-
-```text
-Processing FPS = so frame xu ly / tong thoi gian xu ly
-```
-
-Neu FPS cao, pipeline nhanh hon. Voi MVP offline, FPS khong can realtime tuyet doi, nhung nen co so lieu.
-
-### 10.5. Bang metric nen dua vao README
-
-| Metric | Target MVP | Ket qua thuc te |
-|---|---:|---:|
-| Event Precision | > 80% | TBD |
-| Event Recall | > 70% | TBD |
-| Plate Accuracy | > 85% | TBD |
-| Processing FPS | >= 15 | TBD |
-
-Khong nen dien so ao. Hay chay tren video test va ghi dung ket qua.
-
----
-
-## 11. Cac rui ro ky thuat can biet
-
-### 11.1. Plate detector can model rieng
-
-YOLO COCO khong co license plate. Day la blocker lon neu muon demo LPR that. Can co pretrained/fine-tuned plate detector hoac dung fallback crop heuristic.
-
-### 11.2. OCR phu thuoc chat luong crop
-
-Neu crop bien so sai, OCR backend se khong cuu duoc. Trong OCR pipeline, chat luong crop anh huong rat manh den ket qua cuoi.
-
-### 11.3. Traffic light HSV de sai neu ROI/anh sang khong tot
-
-HSV threshold hop voi MVP, nhung can test tren video that. Neu ROI chua dung, den se luon `unknown` hoac sai mau.
-
-### 11.4. Tracking ID switch lam sai event
-
-Neu ByteTrack doi ID giua chung, event co the khong duoc confirm hoac bi tao trung lap.
-
-### 11.5. Config camera la yeu to song con
-
-Stop line va traffic light ROI sai thi pipeline sai du model co tot.
-
----
-
-## 12. Checklist de bien du an thanh CV-ready
-
-### 12.1. Bat buoc truoc khi dua vao CV
-
-- [x] Co video sample 30-60 giay.
-- [x] Co config camera ban dau cho video sample.
-- [x] Chay end-to-end khong crash.
-- [x] Debug video co bbox, track_id, stop line.
-- [x] Co it nhat 1 event output neu video co vi pham.
-- [x] `event.json` co schema ro rang.
-- [x] Plate OCR co ket qua thuc, khong phai placeholder.
-- [ ] README co demo GIF/video.
-- [ ] Co metric thuc te.
-- [x] `python -m pytest` pass trong moi truong hien tai.
-
-### 12.2. Nen co neu muon gay an tuong hon
-
-- [ ] So sanh truoc/sau OCR fusion.
-- [ ] Bang loi thuong gap: false positive, false negative.
-- [ ] Anh minh hoa pipeline trong README.
-- [ ] Script evaluate metrics.
-- [ ] Huong dan annotate stop line/ROI.
-- [ ] Dockerfile hoac environment setup on dinh.
-
----
-
-## 13. Cach ke du an nay trong CV
-
-Khi du an da co demo va metrics, co the viet:
+**Tiếng Anh:**
 
 ```text
 Traffic Violation Detection & License Plate Recognition
-- Built an offline fixed-camera computer vision pipeline using YOLOv8, tracking, OpenCV, and OCR backends to detect red-light crossing violations and recognize license plates.
-- Implemented vehicle tracking, stop-line crossing geometry, traffic-light color estimation, OCR temporal fusion, and evidence generation with JSON metadata.
-- Evaluated on N annotated traffic clips, achieving X% event precision, Y% recall, Z% plate accuracy, and K FPS processing speed.
+- Built an offline fixed-camera CV pipeline using YOLOv8, tracking, and OCR
+  to detect red-light violations and read license plates.
+- Designed 8-stage pipeline: detection → tracking → light estimation →
+  stop-line crossing → state machine → plate detection → OCR fusion → evidence.
+- Fine-tuned YOLOv8 plate detector on CCPD subset (mAP50 = 0.994).
+- 100% candidate precision, ~19.5 FPS on test video.
 ```
 
-Phien ban tieng Viet de tu giai thich khi phong van:
+**Tiếng Việt (phỏng vấn):**
 
 ```text
-Em xay dung mot pipeline xu ly video giao thong tu camera co dinh. Dau tien he thong dung YOLO de detect xe, sau do tracker de gan ID cho xe qua nhieu frame. Em dung ROI va HSV threshold de xac dinh den giao thong, dung geometry de kiem tra xe co cat qua vach dung hay khong. Neu xe cat qua vach luc den do, he thong tao event vi pham, crop bien so, dung OCR backend phu hop domain de doc bien so va hop nhat ket qua OCR qua nhieu frame. Cuoi cung he thong luu anh, clip va JSON metadata lam bang chung.
+Em xây dựng pipeline xử lý video giao thông từ camera cố định. Hệ thống dùng
+YOLO detect xe, tracker gán ID qua frame, ROI+HSV xác định đèn, geometry kiểm
+tra cắt vạch. Nếu vi phạm → crop biển số, OCR + fusion nhiều frame, lưu ảnh/
+clip/JSON làm bằng chứng.
 ```
 
 ---
 
-## 14. Cau hoi phong van co the gap
+## 14. Câu hỏi phỏng vấn
 
-### Cau 1: Vi sao can tracking, sao khong detect tung frame la du?
+**Q: Vì sao cần tracking?**
+Vi phạm là sự kiện theo thời gian — cần biết cùng xe đi từ đâu đến đâu. Tracking cũng giúp gom OCR nhiều frame.
 
-Detection chi cho biet trong mot frame co xe. Vi pham vuot den do la su kien theo thoi gian, can biet cung mot xe di tu dau den dau va co cat qua stop line hay khong. Tracking giup gan `track_id` va theo doi duong di cua xe.
+**Q: Vì sao dùng HSV thay vì train model đèn?**
+Camera cố định, ROI đánh dấu sẵn, HSV đủ cho MVP ban ngày. Nếu mở rộng → thay bằng classification model.
 
-### Cau 2: Vi sao dung HSV cho den giao thong thay vi train model?
+**Q: Điểm yếu lớn nhất?**
+OCR phụ thuộc chất lượng crop. Crop nhỏ/mờ → accuracy thấp. Tracking ID switch cũng là rủi ro.
 
-Vi camera co dinh va ROI den giao thong co the danh dau thu cong. HSV threshold don gian, nhanh, khong can dataset. Voi MVP ban ngay, cach nay du de demo. Neu mo rong cho nhieu camera/dieu kien anh sang, co the thay bang model classification rieng.
+**Q: Giảm false positive thế nào?**
+Tăng confidence threshold, yêu cầu track đủ frame, kiểm tra direction, thêm road ROI, thêm lane-specific rule.
 
-### Cau 3: Diem yeu lon nhat cua pipeline la gi?
-
-Plate OCR phu thuoc nhieu vao chat luong plate crop. Neu bien so nho, mo, nghieng hoac plate detector sai, OCR se sai. Ngoai ra tracking ID switch va ROI den giao thong sai cung co the lam sai event.
-
-### Cau 4: Lam sao de giam false positive?
-
-- Tang confidence threshold cho vehicle detector.
-- Kiem tra track phai ton tai du so frame.
-- Yeu cau den phai do voi confidence du cao.
-- Kiem tra crossing direction.
-- Them road ROI de bo qua xe ngoai vung duong.
-- Review debug video va dieu chinh stop line.
-
-### Cau 5: Lam sao de tang OCR accuracy?
-
-- Dung plate detector dung domain bien so Viet Nam.
-- Crop bien so ro hon va resize truoc OCR.
-- OCR nhieu frame va temporal fusion.
-- Loc format bien so Viet Nam.
-- Chon frame co bien so lon/it mo nhat.
+**Q: "Tích hợp model" khác "train model" ở đâu?**
+Tích hợp = nối output model A → input model B + logic nghiệp vụ. Train = thu thập data, gán nhãn, train, evaluate. Dự án có cả hai (pipeline + fine-tune plate detector).
 
 ---
 
-## 15. Lo trinh hoc neu ban la tay ngang
+## 15. Lộ trình học
 
-Nen hoc theo thu tu sau:
-
-1. **Python + NumPy co ban**
-   - List, dict, function, class.
-   - Array va shape anh.
-
-2. **OpenCV co ban**
-   - Doc anh/video.
-   - Ve bbox/text.
-   - Crop anh.
-   - BGR/HSV.
-
-3. **Object Detection**
-   - Bounding box la gi.
-   - Confidence la gi.
-   - YOLO dung nhu the nao.
-
-4. **Tracking**
-   - Track ID la gi.
-   - Vi sao can tracking trong video.
-
-5. **Geometry**
-   - Diem, doan thang.
-   - Kiem tra line crossing.
-
-6. **OCR**
-   - OCR la gi.
-   - Vi sao bien so kho doc.
-   - Fusion nhieu frame.
-
-7. **Evaluation**
-   - Precision, recall.
-   - False positive, false negative.
-   - Cach ghi metric that.
-
-8. **Software engineering**
-   - Tach module.
-   - Config.
-   - Tests.
-   - README va demo.
+1. **Python + NumPy** — cơ bản về array, shape ảnh.
+2. **OpenCV** — đọc video, vẽ bbox, crop, BGR/HSV.
+3. **Object Detection** — bbox, confidence, NMS, YOLO.
+4. **Tracking** — track ID, vì sao cần tracking video.
+5. **Geometry** — line crossing, Shapely.
+6. **OCR** — OCR là gì, fusion nhiều frame.
+7. **Evaluation** — precision, recall, cách ghi metric thật.
+8. **Software Engineering** — module, config, test, README.
 
 ---
 
-## 16. Giai thich mot so thuat ngu
+## 16. Thuật ngữ
 
-| Thuat ngu | Giai thich ngan |
+| Thuật ngữ | Giải thích |
 |---|---|
-| Frame | Mot anh trong video |
-| FPS | So frame moi giay |
-| Bounding box | Hinh chu nhat bao quanh vat the |
-| Detection | Phat hien vat the trong anh |
-| Tracking | Theo doi vat the qua nhieu frame |
-| Track ID | Ma dinh danh cua mot vat the trong video |
-| ROI | Vung anh can quan tam |
-| HSV | Khong gian mau de loc mau de hon BGR/RGB |
-| OCR | Nhan dien chu trong anh |
-| Temporal fusion | Hop nhat ket qua qua nhieu frame |
-| Event | Su kien co y nghia, o day la vi pham giao thong |
-| Metadata | Du lieu mo ta event, luu trong JSON |
-| Precision | Ty le du doan dung trong cac case he thong bao co |
-| Recall | Ty le phat hien duoc trong cac case that su co |
+| Frame | Một ảnh trong video |
+| FPS | Số frame mỗi giây |
+| Bounding box | Hình chữ nhật bao quanh vật thể |
+| Track ID | Mã định danh vật thể qua video |
+| ROI | Vùng ảnh quan tâm |
+| HSV | Không gian màu (Hue, Saturation, Value) |
+| OCR | Nhận diện chữ trong ảnh |
+| Temporal fusion | Hợp nhất kết quả qua nhiều frame |
+| State machine | Mô hình trạng thái (pending → confirmed) |
+| Precision | Tỷ lệ đúng trong các case hệ thống báo có |
+| Recall | Tỷ lệ phát hiện trong các case thực sự có |
+| NMS | Loại bỏ bbox trùng lặp |
+| mAP | Mean Average Precision — metric đánh giá detection |
 
 ---
 
-## 17. Ket luan
+## 17. Kết luận
 
-Du an nay co nen lam main project CV khong? **Co.**
+Dự án này có nên làm main project CV không? **Có.**
 
-Nhung dieu kien la phai bien no tu scaffold thanh demo co bang chung that:
+Giá trị lớn nhất không nằm ở việc "dùng YOLO", mà ở việc bạn xây được pipeline nhiều thành phần: detection, tracking, traffic light estimation, geometry, OCR, fusion, evidence, storage và evaluation.
 
-- Co video sample. (Da co o Layer 1)
-- Chay end-to-end.
-- Luu duoc event.
-- Doc duoc bien so o mot so case.
-- Co metric that.
-- README co demo ro rang.
-
-Gia tri lon nhat cua project khong nam o viec "dung YOLO", ma nam o viec ban xay duoc mot pipeline co nhieu thanh phan: detection, tracking, traffic light estimation, geometry, OCR, evidence, storage va evaluation.
-
-Neu ban hieu va giai thich duoc tung stage trong tai lieu nay, ban da co mot nen tang rat tot de trinh bay project trong phong van AI/CV Intern.
+Nếu bạn hiểu và giải thích được từng stage trong tài liệu này, bạn đã có nền tảng rất tốt để trình bày project trong phỏng vấn AI/CV Intern.
