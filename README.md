@@ -209,6 +209,26 @@ outputs/reports/ccpd_layer4_sample_contact.jpg
 
 Subset size: 8,598 images total, including 8,000 positive plate samples and 598 no-plate negative samples. The full raw CCPD folder/archive is not needed after this conversion.
 
+Dataset processing work completed:
+
+| Step | What was done | Why it matters |
+|---|---|---|
+| Compact subset selection | Sampled CCPD base/blur/rotate/tilt/weather/challenge/no-plate sources | Keeps the dataset small enough for local iteration while preserving edge cases |
+| Standard structure | Created `images`, `labels`, `ocr_crops`, `ocr_labels`, and `splits` folders | Makes the dataset reproducible and easy to audit |
+| Annotation conversion | Parsed CCPD filenames and converted plate boxes into YOLO bbox labels | Enables one-class YOLO plate detector training |
+| Train/val/test split | Built deterministic split with seed `42` | Keeps experiments reproducible |
+| Negative samples | Added 598 no-plate images with empty labels | Helps reduce false positives |
+| OCR crops | Generated 8,000 cropped plate images and text labels | Separates plate detection debugging from OCR debugging |
+| Manifest | Wrote per-image provenance and metadata in `manifest.json` | Tracks source, split, bbox, crop path, plate text, brightness, and blur |
+
+Current split:
+
+| Split | Images | YOLO labels | OCR crops | Positive | Negative |
+|---|---:|---:|---:|---:|---:|
+| Train | 6,398 | 6,398 | 6,000 | 6,000 | 398 |
+| Val | 1,100 | 1,100 | 1,000 | 1,000 | 100 |
+| Test | 1,100 | 1,100 | 1,000 | 1,000 | 100 |
+
 Training command used for the current local detector:
 
 ```bash
@@ -219,6 +239,50 @@ python scripts/train_plate_detector.py \
 ```
 
 Best validation result from the current run: precision `0.989`, recall `0.998`, mAP50 `0.994`, mAP50-95 `0.73`. The exported local weight is `models/plate_detector/ccpd_yolov8n_best.pt`; model weights are intentionally ignored by Git.
+
+### Dataset Engineering & QA
+
+The dataset is also audited as a data-quality workflow, not only used for model training:
+
+```bash
+python scripts/audit_plate_dataset.py
+```
+
+Generated QA artifacts:
+
+```text
+outputs/reports/dataset_audit_report.md
+outputs/reports/dataset_duplicates_report.md
+outputs/reports/dataset_contact_dark.jpg
+outputs/reports/dataset_contact_heavy_blur.jpg
+outputs/reports/dataset_contact_small_plate.jpg
+outputs/reports/dataset_contact_weather.jpg
+outputs/reports/dataset_contact_challenge.jpg
+outputs/reports/dataset_contact_negative.jpg
+data/processed/ccpd_layer4/manifest_quality.json
+```
+
+Latest dataset audit result:
+
+| Metric | Result |
+|---|---:|
+| Blocking integrity issues | 0 |
+| Missing images / labels / OCR crops | 0 |
+| YOLO bbox out-of-range issues | 0 |
+| Negative labels with unexpected content | 0 |
+| Exact duplicate groups | 2 |
+| Perceptual-hash collision groups | 102 |
+| Dark positive images | 1,955 |
+| Heavy-blur positive images | 4,349 |
+| Small-plate positive images | 285 |
+| Avg plate area ratio | 0.0328 |
+
+Notes:
+
+- Duplicate and perceptual-hash groups are review candidates; they are not automatically deleted.
+- `manifest_quality.json` adds quality flags such as dark, bright, heavy_blur, small_plate, source_weather, source_challenge, and negative_sample.
+- Contact sheets are generated for visual QA so edge cases can be reviewed quickly by a human.
+- This dataset workflow demonstrates dataset organization, annotation consistency, metadata tracking, QA checks, duplicate review, and real-world edge-case analysis.
 
 ## Layer 5 Evaluation & Portfolio Assets
 
