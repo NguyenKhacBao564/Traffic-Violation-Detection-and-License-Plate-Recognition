@@ -331,6 +331,119 @@ outputs/reports/layer5_demo_contact_redacted.jpg
 outputs/debug_videos/layer5_demo_redacted.mp4
 ```
 
+## System & App Improvements for AI Camera Evidence Review
+
+The original project is an offline CLI pipeline. A lightweight FastAPI wrapper has been added to make it closer to a small AI camera backend/evidence review system without changing the core detection logic.
+
+The API wraps the existing pipeline:
+
+```text
+FastAPI request
+  -> existing src/main.py pipeline
+  -> event folders under outputs/events_api
+  -> event reader
+  -> evidence review endpoints
+```
+
+Run locally:
+
+```bash
+python -m uvicorn src.api.app:app --reload --host 127.0.0.1 --port 8000
+```
+
+Optional environment defaults:
+
+```bash
+export DEFAULT_EVENTS_DIR=outputs/events_api
+export DEFAULT_MAX_FRAMES=900
+export DEFAULT_OCR_BACKEND=hyperlpr
+export ENABLE_API_DEBUG=false
+```
+
+API endpoints:
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/health` | Service health check |
+| `POST` | `/api/v1/videos/analyze` | Run the existing video analysis pipeline synchronously |
+| `GET` | `/api/v1/events` | List event evidence from an events directory |
+| `GET` | `/api/v1/events/{event_id}` | Get one event's metadata and review status |
+| `GET` | `/api/v1/events/{event_id}/frame` | Return full-frame evidence image |
+| `GET` | `/api/v1/events/{event_id}/plate` | Return cropped plate image |
+| `GET` | `/api/v1/events/{event_id}/clip` | Return evidence clip when available |
+| `PATCH` | `/api/v1/events/{event_id}/review` | Write human review status to `review.json` |
+
+Example analysis request:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/videos/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "video_path": "data/raw_videos/clips/cam_01_clip_001.mp4",
+    "camera_config": "configs/cameras/cam_01.json",
+    "events_dir": "outputs/events_api",
+    "max_frames": 900,
+    "enable_ocr": true,
+    "ocr_backend": "hyperlpr"
+  }'
+```
+
+Example response shape:
+
+```json
+{
+  "job_id": "local_sync_...",
+  "status": "completed",
+  "events_dir": "outputs/events_api",
+  "summary": {
+    "processed_frames": 900,
+    "violation_candidates": 4,
+    "events_with_plate": 3,
+    "ocr_events": 2,
+    "processing_fps": 18.7,
+    "total_runtime_seconds": 48.1
+  }
+}
+```
+
+List events:
+
+```bash
+curl "http://127.0.0.1:8000/api/v1/events?events_dir=outputs/events_api&limit=20"
+```
+
+Update review status:
+
+```bash
+curl -X PATCH \
+  "http://127.0.0.1:8000/api/v1/events/EVT_0001/review?events_dir=outputs/events_api" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "review_status": "confirmed",
+    "review_note": "Clear stop-line crossing during red light"
+  }'
+```
+
+Review statuses are intentionally simple: `pending`, `confirmed`, `rejected`, `uncertain`. The API writes a separate `review.json` beside `event.json` instead of introducing a database.
+
+What this adds from a system/app perspective:
+
+- API-driven access to the existing AI pipeline.
+- Event evidence browsing through stable endpoints.
+- Human review workflow for violation candidates.
+- Structured local logging for `video_path`, `camera_config`, `max_frames`, OCR settings, processed frames, event counts, FPS, runtime, and `events_dir`.
+- A clearer backend story for an AI integration or system/app internship.
+
+Intentional scope limits:
+
+- No authentication.
+- No database.
+- No Celery/Kafka/RabbitMQ queue.
+- No model retraining or model weight changes.
+- Existing CLI workflow remains the source of truth.
+
+Large videos, model weights, debug videos, event outputs, snapshots, and generated clips should stay out of git. See [docs/testing_project3_api.md](./docs/testing_project3_api.md) for full API test commands.
+
 ## Documentation
 
 - [Plan.md](./Plan.md): roadmap and layer definitions.
@@ -339,6 +452,7 @@ outputs/debug_videos/layer5_demo_redacted.mp4
 - [PROJECT_GUIDE.md](./PROJECT_GUIDE.md): detailed learning guide for the full pipeline.
 - [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md): baseline runnable engineering checklist.
 - [evaluate.md](./evaluate.md): Layer 5 evaluation policy and commands.
+- [docs/testing_project3_api.md](./docs/testing_project3_api.md): local FastAPI evidence review API test commands.
 
 ## Success Metrics
 

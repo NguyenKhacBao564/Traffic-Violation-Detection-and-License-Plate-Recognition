@@ -62,6 +62,7 @@ models/ocr/
 # Output artifacts
 outputs/debug_videos/
 outputs/events/
+outputs/events_api/
 outputs/events_layer4/
 outputs/logs/
 outputs/reports/
